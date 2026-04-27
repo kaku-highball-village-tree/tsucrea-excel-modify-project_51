@@ -59,13 +59,18 @@ class DRAWITEMSTRUCT(ctypes.Structure):
 
 BUTTON_ID_BASE: int = 1001
 BUTTON_HEIGHT: int = 28
+BUTTON_HEIGHT_MIN: int = 20
 BUTTON_MARGIN: int = 10
+BUTTON_SPACING_MIN: int = 2
+INSTRUCTION_RESERVED_HEIGHT: int = 72
+INSTRUCTION_RESERVED_HEIGHT_MIN: int = 32
 g_last_output_directory: Optional[str] = None
 g_action_button_handles: List[int] = []
 g_action_button_brush_handle: Optional[int] = None
 g_default_gui_font_handle: Optional[int] = None
 g_right_button_down_handle: Optional[int] = None
 g_main_window_handle: Optional[int] = None
+g_instruction_reserved_height_effective: int = INSTRUCTION_RESERVED_HEIGHT
 ACTION_BUTTON_COLOR = (0xC0, 0xE8, 0xFF)
 
 BUTTON_LABELS: Tuple[str, ...] = (
@@ -1181,6 +1186,7 @@ def handle_all_management_data_right_down() -> None:
 
 
 def update_action_button_layout(iWindowHandle: int) -> None:
+    global g_instruction_reserved_height_effective
     if not g_action_button_handles:
         return
     objClientRect = win32gui.GetClientRect(iWindowHandle)
@@ -1188,24 +1194,61 @@ def update_action_button_layout(iWindowHandle: int) -> None:
     if iButtonWidth < 120:
         iButtonWidth = 120
     iButtonX: int = BUTTON_MARGIN
+    iButtonCount: int = len(g_action_button_handles)
+    iEffectiveInstructionReservedHeight: int = INSTRUCTION_RESERVED_HEIGHT
     iButtonSpacing: int = BUTTON_MARGIN
-    iTotalButtonsHeight: int = (
-        BUTTON_HEIGHT * len(g_action_button_handles)
-        + iButtonSpacing * (len(g_action_button_handles) - 1)
-    )
+    iButtonHeight: int = BUTTON_HEIGHT
+    iTotalButtonsHeight: int = 0
+    for _ in range(3):
+        iAvailableHeight: int = objClientRect[3] - iEffectiveInstructionReservedHeight - BUTTON_MARGIN
+        if iAvailableHeight < 0:
+            iAvailableHeight = 0
+        iButtonSpacing = BUTTON_MARGIN
+        if iButtonCount > 1:
+            iButtonSpacingUpperBound = (
+                iAvailableHeight - BUTTON_HEIGHT_MIN * iButtonCount
+            ) // (iButtonCount - 1)
+            iButtonSpacing = min(BUTTON_MARGIN, iButtonSpacingUpperBound)
+            iButtonSpacing = max(BUTTON_SPACING_MIN, iButtonSpacing)
+        else:
+            iButtonSpacing = 0
+        iButtonHeight = BUTTON_HEIGHT
+        if iButtonCount > 0:
+            iButtonHeight = (
+                iAvailableHeight - iButtonSpacing * (iButtonCount - 1)
+            ) // iButtonCount
+        if iButtonHeight > BUTTON_HEIGHT:
+            iButtonHeight = BUTTON_HEIGHT
+        if iButtonHeight < BUTTON_HEIGHT_MIN:
+            iButtonHeight = BUTTON_HEIGHT_MIN
+        iTotalButtonsHeight = (
+            iButtonHeight * iButtonCount
+            + iButtonSpacing * (len(g_action_button_handles) - 1)
+        )
+        iMaxReservedForBottomGap: int = objClientRect[3] - iTotalButtonsHeight - BUTTON_MARGIN * 2
+        if iMaxReservedForBottomGap < 0:
+            iMaxReservedForBottomGap = 0
+        iAdjustedReservedHeight: int = min(iEffectiveInstructionReservedHeight, iMaxReservedForBottomGap)
+        if iAdjustedReservedHeight < INSTRUCTION_RESERVED_HEIGHT_MIN and iMaxReservedForBottomGap >= INSTRUCTION_RESERVED_HEIGHT_MIN:
+            iAdjustedReservedHeight = INSTRUCTION_RESERVED_HEIGHT_MIN
+        if iAdjustedReservedHeight == iEffectiveInstructionReservedHeight:
+            break
+        iEffectiveInstructionReservedHeight = iAdjustedReservedHeight
+    g_instruction_reserved_height_effective = iEffectiveInstructionReservedHeight
     iButtonY: int = objClientRect[3] - BUTTON_MARGIN - iTotalButtonsHeight
-    if iButtonY < BUTTON_MARGIN:
-        iButtonY = BUTTON_MARGIN
+    iTopLimitY: int = iEffectiveInstructionReservedHeight + BUTTON_MARGIN
+    if iButtonY < iTopLimitY:
+        iButtonY = iTopLimitY
     for iButtonHandle in g_action_button_handles:
         win32gui.MoveWindow(
             iButtonHandle,
             iButtonX,
             iButtonY,
             iButtonWidth,
-            BUTTON_HEIGHT,
+            iButtonHeight,
             True,
         )
-        iButtonY += BUTTON_HEIGHT + iButtonSpacing
+        iButtonY += iButtonHeight + iButtonSpacing
 
 
 def handle_action_button_left_click(iButtonId: int) -> None:
@@ -1922,12 +1965,17 @@ def draw_instruction_text(
         )
 
     iMargin: int = 5
-    iBottomReserved: int = 0
+    iInstructionBottom: int = g_instruction_reserved_height_effective
+    iMaxBottom: int = objClientRect[3] - iMargin
+    if iInstructionBottom > iMaxBottom:
+        iInstructionBottom = iMaxBottom
+    if iInstructionBottom < iMargin:
+        iInstructionBottom = iMargin
     objClientRect = (
         objClientRect[0] + iMargin,
         objClientRect[1] + iMargin,
         objClientRect[2] - iMargin,
-        objClientRect[3] - iMargin - iBottomReserved,
+        iInstructionBottom,
     )
 
     pszInstructionText: str = (
