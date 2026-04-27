@@ -1195,46 +1195,46 @@ def update_action_button_layout(iWindowHandle: int) -> None:
         iButtonWidth = 120
     iButtonX: int = BUTTON_MARGIN
     iButtonCount: int = len(g_action_button_handles)
-    iMinimumButtonStackHeight: int = (
-        BUTTON_HEIGHT_MIN * iButtonCount
-        + BUTTON_SPACING_MIN * max(0, iButtonCount - 1)
-    )
     iEffectiveInstructionReservedHeight: int = INSTRUCTION_RESERVED_HEIGHT
-    iMaximumInstructionReservedHeight: int = (
-        objClientRect[3] - BUTTON_MARGIN - iMinimumButtonStackHeight
-    )
-    if iEffectiveInstructionReservedHeight > iMaximumInstructionReservedHeight:
-        iEffectiveInstructionReservedHeight = iMaximumInstructionReservedHeight
-    if iEffectiveInstructionReservedHeight < INSTRUCTION_RESERVED_HEIGHT_MIN:
-        iEffectiveInstructionReservedHeight = INSTRUCTION_RESERVED_HEIGHT_MIN
-    if iEffectiveInstructionReservedHeight < 0:
-        iEffectiveInstructionReservedHeight = 0
-    g_instruction_reserved_height_effective = iEffectiveInstructionReservedHeight
-    iAvailableHeight: int = objClientRect[3] - iEffectiveInstructionReservedHeight - BUTTON_MARGIN
-    if iAvailableHeight < 0:
-        iAvailableHeight = 0
     iButtonSpacing: int = BUTTON_MARGIN
-    if iButtonCount > 1:
-        iButtonSpacingUpperBound = (
-            iAvailableHeight - BUTTON_HEIGHT_MIN * iButtonCount
-        ) // (iButtonCount - 1)
-        iButtonSpacing = min(BUTTON_MARGIN, iButtonSpacingUpperBound)
-        iButtonSpacing = max(BUTTON_SPACING_MIN, iButtonSpacing)
-    else:
-        iButtonSpacing = 0
     iButtonHeight: int = BUTTON_HEIGHT
-    if iButtonCount > 0:
-        iButtonHeight = (
-            iAvailableHeight - iButtonSpacing * (iButtonCount - 1)
-        ) // iButtonCount
-    if iButtonHeight > BUTTON_HEIGHT:
+    iTotalButtonsHeight: int = 0
+    for _ in range(3):
+        iAvailableHeight: int = objClientRect[3] - iEffectiveInstructionReservedHeight - BUTTON_MARGIN
+        if iAvailableHeight < 0:
+            iAvailableHeight = 0
+        iButtonSpacing = BUTTON_MARGIN
+        if iButtonCount > 1:
+            iButtonSpacingUpperBound = (
+                iAvailableHeight - BUTTON_HEIGHT_MIN * iButtonCount
+            ) // (iButtonCount - 1)
+            iButtonSpacing = min(BUTTON_MARGIN, iButtonSpacingUpperBound)
+            iButtonSpacing = max(BUTTON_SPACING_MIN, iButtonSpacing)
+        else:
+            iButtonSpacing = 0
         iButtonHeight = BUTTON_HEIGHT
-    if iButtonHeight < BUTTON_HEIGHT_MIN:
-        iButtonHeight = BUTTON_HEIGHT_MIN
-    iTotalButtonsHeight: int = (
-        iButtonHeight * iButtonCount
-        + iButtonSpacing * (len(g_action_button_handles) - 1)
-    )
+        if iButtonCount > 0:
+            iButtonHeight = (
+                iAvailableHeight - iButtonSpacing * (iButtonCount - 1)
+            ) // iButtonCount
+        if iButtonHeight > BUTTON_HEIGHT:
+            iButtonHeight = BUTTON_HEIGHT
+        if iButtonHeight < BUTTON_HEIGHT_MIN:
+            iButtonHeight = BUTTON_HEIGHT_MIN
+        iTotalButtonsHeight = (
+            iButtonHeight * iButtonCount
+            + iButtonSpacing * (len(g_action_button_handles) - 1)
+        )
+        iMaxReservedForBottomGap: int = objClientRect[3] - iTotalButtonsHeight - BUTTON_MARGIN * 2
+        if iMaxReservedForBottomGap < 0:
+            iMaxReservedForBottomGap = 0
+        iAdjustedReservedHeight: int = min(iEffectiveInstructionReservedHeight, iMaxReservedForBottomGap)
+        if iAdjustedReservedHeight < INSTRUCTION_RESERVED_HEIGHT_MIN and iMaxReservedForBottomGap >= INSTRUCTION_RESERVED_HEIGHT_MIN:
+            iAdjustedReservedHeight = INSTRUCTION_RESERVED_HEIGHT_MIN
+        if iAdjustedReservedHeight == iEffectiveInstructionReservedHeight:
+            break
+        iEffectiveInstructionReservedHeight = iAdjustedReservedHeight
+    g_instruction_reserved_height_effective = iEffectiveInstructionReservedHeight
     iButtonY: int = objClientRect[3] - BUTTON_MARGIN - iTotalButtonsHeight
     iTopLimitY: int = iEffectiveInstructionReservedHeight + BUTTON_MARGIN
     if iButtonY < iTopLimitY:
