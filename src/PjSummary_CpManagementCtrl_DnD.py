@@ -2492,8 +2492,8 @@ def create_main_window(
     iWindowPosY: int = win32con.CW_USEDEFAULT
     iDesktopWidth: int = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
     iDesktopHeight: int = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
-    iWindowWidth: int = int(iDesktopWidth * 0.5)
-    iWindowHeight: int = int(iDesktopHeight * 0.5)
+    iWindowWidth: int = int(iDesktopWidth * 0.5625)
+    iWindowHeight: int = int(iDesktopHeight * 0.5625)
     iParentWindowHandle: int = 0
     iMenuHandle: int = 0
 
