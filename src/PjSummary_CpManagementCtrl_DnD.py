@@ -1373,6 +1373,8 @@ def update_topmost_toggle_button_layout(iWindowHandle: int) -> None:
     if g_topmost_toggle_button_handle is None:
         return
     objClientRect = win32gui.GetClientRect(iWindowHandle)
+    if objClientRect[2] <= 0 or objClientRect[3] <= 0:
+        return
     if objClientRect[2] < TOPMOST_TOGGLE_BUTTON_MIN_VISIBLE_WIDTH:
         win32gui.ShowWindow(g_topmost_toggle_button_handle, win32con.SW_HIDE)
         return
@@ -2452,6 +2454,7 @@ def create_main_window(
     )
     win32gui.UpdateWindow(iWindowHandle)
     update_action_button_layout(iWindowHandle)
+    update_topmost_toggle_button_layout(iWindowHandle)
     win32gui.InvalidateRect(iWindowHandle, None, True)
 
     set_topmost_enabled(iWindowHandle, True)
