@@ -58,12 +58,16 @@ class DRAWITEMSTRUCT(ctypes.Structure):
     ]
 
 BUTTON_ID_BASE: int = 1001
+TOPMOST_TOGGLE_BUTTON_ID: int = 2001
 BUTTON_HEIGHT: int = 28
 BUTTON_HEIGHT_MIN: int = 20
 BUTTON_MARGIN: int = 10
 BUTTON_SPACING_MIN: int = 2
 INSTRUCTION_RESERVED_HEIGHT: int = 72
 INSTRUCTION_RESERVED_HEIGHT_MIN: int = 32
+TOPMOST_TOGGLE_BUTTON_SIZE: int = 28
+TOPMOST_TOGGLE_BUTTON_MARGIN: int = 10
+TOPMOST_TOGGLE_BUTTON_MIN_VISIBLE_WIDTH: int = 220
 g_last_output_directory: Optional[str] = None
 g_action_button_handles: List[int] = []
 g_action_button_brush_handle: Optional[int] = None
@@ -71,6 +75,8 @@ g_default_gui_font_handle: Optional[int] = None
 g_right_button_down_handle: Optional[int] = None
 g_main_window_handle: Optional[int] = None
 g_instruction_reserved_height_effective: int = INSTRUCTION_RESERVED_HEIGHT
+g_topmost_toggle_button_handle: Optional[int] = None
+g_is_topmost_enabled: bool = True
 ACTION_BUTTON_COLOR = (0xC0, 0xE8, 0xFF)
 
 BUTTON_LABELS: Tuple[str, ...] = (
@@ -1363,6 +1369,90 @@ def create_action_buttons(iWindowHandle: int) -> None:
     update_action_button_layout(iWindowHandle)
 
 
+def update_topmost_toggle_button_layout(iWindowHandle: int) -> None:
+    if g_topmost_toggle_button_handle is None:
+        return
+    objClientRect = win32gui.GetClientRect(iWindowHandle)
+    if objClientRect[2] < TOPMOST_TOGGLE_BUTTON_MIN_VISIBLE_WIDTH:
+        win32gui.ShowWindow(g_topmost_toggle_button_handle, win32con.SW_HIDE)
+        return
+    iButtonSize: int = TOPMOST_TOGGLE_BUTTON_SIZE
+    iButtonX: int = objClientRect[2] - TOPMOST_TOGGLE_BUTTON_MARGIN - iButtonSize
+    iButtonY: int = TOPMOST_TOGGLE_BUTTON_MARGIN
+    if iButtonX < TOPMOST_TOGGLE_BUTTON_MARGIN:
+        iButtonX = TOPMOST_TOGGLE_BUTTON_MARGIN
+    if iButtonY < TOPMOST_TOGGLE_BUTTON_MARGIN:
+        iButtonY = TOPMOST_TOGGLE_BUTTON_MARGIN
+    win32gui.MoveWindow(
+        g_topmost_toggle_button_handle,
+        iButtonX,
+        iButtonY,
+        iButtonSize,
+        iButtonSize,
+        True,
+    )
+    win32gui.ShowWindow(g_topmost_toggle_button_handle, win32con.SW_SHOWNORMAL)
+
+
+def update_topmost_toggle_button_caption() -> None:
+    if g_topmost_toggle_button_handle is None:
+        return
+    pszCaption: str = "ON" if g_is_topmost_enabled else "OFF"
+    win32gui.SetWindowText(g_topmost_toggle_button_handle, pszCaption)
+
+
+def set_topmost_enabled(iWindowHandle: int, bEnabled: bool) -> None:
+    global g_is_topmost_enabled
+    iHwndInsertAfter: int = win32con.HWND_TOPMOST if bEnabled else win32con.HWND_NOTOPMOST
+    iFlags: int = win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+    win32gui.SetWindowPos(
+        iWindowHandle,
+        iHwndInsertAfter,
+        0,
+        0,
+        0,
+        0,
+        iFlags,
+    )
+    g_is_topmost_enabled = bEnabled
+    update_topmost_toggle_button_caption()
+
+
+def toggle_topmost_enabled(iWindowHandle: int) -> None:
+    set_topmost_enabled(iWindowHandle, not g_is_topmost_enabled)
+
+
+def create_topmost_toggle_button(iWindowHandle: int) -> None:
+    global g_topmost_toggle_button_handle
+    if g_topmost_toggle_button_handle is not None:
+        return
+    iButtonHandle: int = win32gui.CreateWindowEx(
+        win32con.WS_EX_NOPARENTNOTIFY,
+        "BUTTON",
+        "ON",
+        win32con.WS_TABSTOP | win32con.WS_VISIBLE | win32con.WS_CHILD,
+        0,
+        0,
+        TOPMOST_TOGGLE_BUTTON_SIZE,
+        TOPMOST_TOGGLE_BUTTON_SIZE,
+        iWindowHandle,
+        TOPMOST_TOGGLE_BUTTON_ID,
+        win32api.GetModuleHandle(None),
+        None,
+    )
+    iFontHandle = ensure_default_gui_font_handle()
+    if iFontHandle:
+        win32gui.SendMessage(
+            iButtonHandle,
+            win32con.WM_SETFONT,
+            iFontHandle,
+            True,
+        )
+    g_topmost_toggle_button_handle = iButtonHandle
+    update_topmost_toggle_button_caption()
+    update_topmost_toggle_button_layout(iWindowHandle)
+
+
 def ensure_action_button_brush() -> Optional[int]:
     global g_action_button_brush_handle
     if g_action_button_brush_handle is None:
@@ -2016,6 +2106,7 @@ def window_proc(
         )
         if not g_action_button_handles:
             create_action_buttons(iWindowHandle)
+        create_topmost_toggle_button(iWindowHandle)
         return 0
 
     if iMessage == win32con.WM_DROPFILES:
@@ -2147,6 +2238,9 @@ def window_proc(
         iButtonId = get_low_word(iWparam)
         iNotifyCode = get_high_word(iWparam)
         if iNotifyCode == win32con.BN_CLICKED:
+            if iButtonId == TOPMOST_TOGGLE_BUTTON_ID:
+                toggle_topmost_enabled(iWindowHandle)
+                return 0
             handle_action_button_left_click(iButtonId)
             return 0
 
@@ -2236,6 +2330,7 @@ def window_proc(
 
     if iMessage == win32con.WM_SIZE:
         update_action_button_layout(iWindowHandle)
+        update_topmost_toggle_button_layout(iWindowHandle)
         return 0
 
     if iMessage == win32con.WM_CTLCOLORBTN:
@@ -2359,17 +2454,7 @@ def create_main_window(
     update_action_button_layout(iWindowHandle)
     win32gui.InvalidateRect(iWindowHandle, None, True)
 
-    iHwndInsertAfter: int = win32con.HWND_TOPMOST
-    iFlags: int = win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
-    win32gui.SetWindowPos(
-        iWindowHandle,
-        iHwndInsertAfter,
-        0,
-        0,
-        0,
-        0,
-        iFlags,
-    )
+    set_topmost_enabled(iWindowHandle, True)
 
     win32gui.DragAcceptFiles(
         iWindowHandle,
