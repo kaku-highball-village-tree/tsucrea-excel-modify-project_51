@@ -1375,9 +1375,6 @@ def update_topmost_toggle_button_layout(iWindowHandle: int) -> None:
     objClientRect = win32gui.GetClientRect(iWindowHandle)
     if objClientRect[2] <= 0 or objClientRect[3] <= 0:
         return
-    if objClientRect[2] < TOPMOST_TOGGLE_BUTTON_MIN_VISIBLE_WIDTH:
-        win32gui.ShowWindow(g_topmost_toggle_button_handle, win32con.SW_HIDE)
-        return
     iButtonSize: int = TOPMOST_TOGGLE_BUTTON_SIZE
     iButtonX: int = objClientRect[2] - TOPMOST_TOGGLE_BUTTON_MARGIN - iButtonSize
     iButtonY: int = TOPMOST_TOGGLE_BUTTON_MARGIN
