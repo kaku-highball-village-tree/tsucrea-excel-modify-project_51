@@ -163,6 +163,15 @@ def append_error_log(pszMessage: str) -> None:
         objFile.write(pszMessage + "\n")
 
 
+def append_topmost_debug_log(pszEvent: str, objFields: Optional[Dict[str, object]] = None) -> None:
+    pszTimestamp: str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    objParts: List[str] = [pszTimestamp, pszEvent]
+    if objFields:
+        for pszKey, objValue in objFields.items():
+            objParts.append(f"{pszKey}={objValue}")
+    append_error_log("\t".join(objParts))
+
+
 def write_return_code_error_details(
     pszScriptName: str,
     iReturnCode: int,
@@ -1371,9 +1380,14 @@ def create_action_buttons(iWindowHandle: int) -> None:
 
 def update_topmost_toggle_button_layout(iWindowHandle: int) -> None:
     if g_topmost_toggle_button_handle is None:
+        append_topmost_debug_log("EVT_TOPMOST_TOGGLE_LAYOUT_SKIP", {"reason": "no_handle"})
         return
     objClientRect = win32gui.GetClientRect(iWindowHandle)
     if objClientRect[2] <= 0 or objClientRect[3] <= 0:
+        append_topmost_debug_log(
+            "EVT_TOPMOST_TOGGLE_LAYOUT_SKIP",
+            {"reason": "client_not_ready", "client_rect": objClientRect},
+        )
         return
     iButtonSize: int = TOPMOST_TOGGLE_BUTTON_SIZE
     iButtonX: int = objClientRect[2] - TOPMOST_TOGGLE_BUTTON_MARGIN - iButtonSize
@@ -1391,6 +1405,29 @@ def update_topmost_toggle_button_layout(iWindowHandle: int) -> None:
         True,
     )
     win32gui.ShowWindow(g_topmost_toggle_button_handle, win32con.SW_SHOWNORMAL)
+    append_topmost_debug_log(
+        "EVT_TOPMOST_TOGGLE_LAYOUT",
+        {
+            "hwnd": g_topmost_toggle_button_handle,
+            "client_rect": objClientRect,
+            "target_rect": (iButtonX, iButtonY, iButtonSize, iButtonSize),
+            "show_mode": "SW_SHOWNORMAL",
+        },
+    )
+    try:
+        objActualRect = win32gui.GetWindowRect(g_topmost_toggle_button_handle)
+        append_topmost_debug_log(
+            "EVT_TOPMOST_TOGGLE_ACTUAL_RECT",
+            {
+                "hwnd": g_topmost_toggle_button_handle,
+                "actual_rect": objActualRect,
+            },
+        )
+    except Exception as exc:
+        append_topmost_debug_log(
+            "EVT_TOPMOST_TOGGLE_ACTUAL_RECT_ERROR",
+            {"hwnd": g_topmost_toggle_button_handle, "detail": str(exc)},
+        )
 
 
 def update_topmost_toggle_button_caption() -> None:
@@ -1415,6 +1452,10 @@ def set_topmost_enabled(iWindowHandle: int, bEnabled: bool) -> None:
     )
     g_is_topmost_enabled = bEnabled
     update_topmost_toggle_button_caption()
+    append_topmost_debug_log(
+        "EVT_TOPMOST_STATE",
+        {"window": iWindowHandle, "enabled": bEnabled},
+    )
 
 
 def toggle_topmost_enabled(iWindowHandle: int) -> None:
@@ -1424,6 +1465,10 @@ def toggle_topmost_enabled(iWindowHandle: int) -> None:
 def create_topmost_toggle_button(iWindowHandle: int) -> None:
     global g_topmost_toggle_button_handle
     if g_topmost_toggle_button_handle is not None:
+        append_topmost_debug_log(
+            "EVT_TOPMOST_TOGGLE_CREATE_SKIP",
+            {"reason": "already_exists", "hwnd": g_topmost_toggle_button_handle},
+        )
         return
     iButtonHandle: int = win32gui.CreateWindowEx(
         win32con.WS_EX_NOPARENTNOTIFY,
@@ -1439,6 +1484,17 @@ def create_topmost_toggle_button(iWindowHandle: int) -> None:
         win32api.GetModuleHandle(None),
         None,
     )
+    iLastError: int = win32api.GetLastError()
+    append_topmost_debug_log(
+        "EVT_TOPMOST_TOGGLE_CREATE",
+        {
+            "handle": iButtonHandle,
+            "create_success": bool(iButtonHandle),
+            "last_error": iLastError,
+            "parent": iWindowHandle,
+            "control_id": TOPMOST_TOGGLE_BUTTON_ID,
+        },
+    )
     iFontHandle = ensure_default_gui_font_handle()
     if iFontHandle:
         win32gui.SendMessage(
@@ -1448,6 +1504,11 @@ def create_topmost_toggle_button(iWindowHandle: int) -> None:
             True,
         )
     g_topmost_toggle_button_handle = iButtonHandle
+    bIsWindow: bool = bool(iButtonHandle) and bool(win32gui.IsWindow(iButtonHandle))
+    append_topmost_debug_log(
+        "EVT_TOPMOST_TOGGLE_HANDLE_VALIDATE",
+        {"phase": "after_create", "hwnd": iButtonHandle, "is_window": bIsWindow},
+    )
     update_topmost_toggle_button_caption()
     update_topmost_toggle_button_layout(iWindowHandle)
 
@@ -2453,6 +2514,15 @@ def create_main_window(
     update_action_button_layout(iWindowHandle)
     update_topmost_toggle_button_layout(iWindowHandle)
     win32gui.InvalidateRect(iWindowHandle, None, True)
+    if g_topmost_toggle_button_handle is not None:
+        append_topmost_debug_log(
+            "EVT_TOPMOST_TOGGLE_HANDLE_VALIDATE",
+            {
+                "phase": "after_startup",
+                "hwnd": g_topmost_toggle_button_handle,
+                "is_window": bool(win32gui.IsWindow(g_topmost_toggle_button_handle)),
+            },
+        )
 
     set_topmost_enabled(iWindowHandle, True)
 
