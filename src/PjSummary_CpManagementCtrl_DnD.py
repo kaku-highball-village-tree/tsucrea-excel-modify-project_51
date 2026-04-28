@@ -2407,31 +2407,6 @@ def window_proc(
             objBrushHandle = ensure_action_button_brush()
             if objBrushHandle is not None:
                 return objBrushHandle
-    if iMessage == win32con.WM_DRAWITEM:
-        objDrawItem = win32gui.PyDRAWITEMSTRUCT(iLparam)
-        if objDrawItem.hwndItem in g_action_button_handles:
-            iDeviceContextHandle = objDrawItem.hDC
-            objRect = objDrawItem.rcItem
-            objBrushHandle = ensure_action_button_brush()
-            if objBrushHandle is not None:
-                win32gui.FillRect(iDeviceContextHandle, objRect, objBrushHandle)
-            win32gui.SetBkMode(iDeviceContextHandle, win32con.TRANSPARENT)
-            win32gui.SetTextColor(iDeviceContextHandle, win32api.RGB(0, 0, 0))
-            iFontHandle = win32gui.GetStockObject(win32con.DEFAULT_GUI_FONT)
-            iPreviousFont = win32gui.SelectObject(iDeviceContextHandle, iFontHandle)
-            pszText: str = win32gui.GetWindowText(objDrawItem.hwndItem)
-            win32gui.DrawText(
-                iDeviceContextHandle,
-                pszText,
-                -1,
-                objRect,
-                win32con.DT_CENTER | win32con.DT_VCENTER | win32con.DT_SINGLELINE,
-            )
-            if iPreviousFont:
-                win32gui.SelectObject(iDeviceContextHandle, iPreviousFont)
-            if objDrawItem.itemState & win32con.ODS_FOCUS:
-                win32gui.DrawFocusRect(iDeviceContextHandle, objRect)
-            return 1
 
     if iMessage == win32con.WM_PAINT:
         draw_instruction_text(
