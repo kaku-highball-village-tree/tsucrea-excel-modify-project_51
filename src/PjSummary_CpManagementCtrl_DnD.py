@@ -2485,6 +2485,8 @@ def create_main_window(
 
     if not g_action_button_handles:
         create_action_buttons(iWindowHandle)
+    if g_topmost_toggle_button_handle is None:
+        create_topmost_toggle_button(iWindowHandle)
 
     win32gui.ShowWindow(
         iWindowHandle,
