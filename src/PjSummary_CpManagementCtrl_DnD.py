@@ -65,6 +65,8 @@ BUTTON_MARGIN: int = 10
 BUTTON_SPACING_MIN: int = 2
 INSTRUCTION_RESERVED_HEIGHT: int = 72
 INSTRUCTION_RESERVED_HEIGHT_MIN: int = 32
+INSTRUCTION_FONT_HEIGHT: int = -17
+INSTRUCTION_FONT_FACE: str = "Meiryo UI"
 TOPMOST_TOGGLE_BUTTON_SIZE: int = 28
 TOPMOST_TOGGLE_BUTTON_MARGIN: int = 10
 TOPMOST_TOGGLE_BUTTON_MIN_VISIBLE_WIDTH: int = 220
@@ -74,6 +76,7 @@ g_action_button_brush_handle: Optional[int] = None
 g_default_gui_font_handle: Optional[int] = None
 g_right_button_down_handle: Optional[int] = None
 g_main_window_handle: Optional[int] = None
+g_instruction_font_handle: Optional[int] = None
 g_instruction_reserved_height_effective: int = INSTRUCTION_RESERVED_HEIGHT
 g_topmost_toggle_button_handle: Optional[int] = None
 g_is_topmost_enabled: bool = True
@@ -1337,6 +1340,33 @@ def ensure_default_gui_font_handle() -> Optional[int]:
     return g_default_gui_font_handle
 
 
+def ensure_instruction_font_handle() -> Optional[int]:
+    global g_instruction_font_handle
+    if g_instruction_font_handle is None:
+        try:
+            g_instruction_font_handle = ctypes.windll.gdi32.CreateFontW(
+                INSTRUCTION_FONT_HEIGHT,
+                0,
+                0,
+                0,
+                win32con.FW_NORMAL,
+                0,
+                0,
+                0,
+                win32con.SHIFTJIS_CHARSET,
+                win32con.OUT_DEFAULT_PRECIS,
+                win32con.CLIP_DEFAULT_PRECIS,
+                win32con.CLEARTYPE_QUALITY,
+                win32con.DEFAULT_PITCH | win32con.FF_DONTCARE,
+                INSTRUCTION_FONT_FACE,
+            )
+        except Exception:
+            g_instruction_font_handle = None
+    if not g_instruction_font_handle:
+        return ensure_default_gui_font_handle()
+    return g_instruction_font_handle
+
+
 def create_action_buttons(iWindowHandle: int) -> None:
     global g_action_button_handles
     g_action_button_handles = []
@@ -1495,7 +1525,7 @@ def create_topmost_toggle_button(iWindowHandle: int) -> None:
             "control_id": TOPMOST_TOGGLE_BUTTON_ID,
         },
     )
-    iFontHandle = ensure_default_gui_font_handle()
+    iFontHandle = ensure_instruction_font_handle()
     if iFontHandle:
         win32gui.SendMessage(
             iButtonHandle,
@@ -2106,7 +2136,7 @@ def draw_instruction_text(
     objClientRect = win32gui.GetClientRect(
         iWindowHandle,
     )
-    iFontHandle = ensure_default_gui_font_handle()
+    iFontHandle = ensure_instruction_font_handle()
     iPreviousFontHandle = None
     if iFontHandle:
         iPreviousFontHandle = win32gui.SelectObject(
