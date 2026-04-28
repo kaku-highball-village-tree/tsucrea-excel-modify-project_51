@@ -1474,7 +1474,7 @@ def create_topmost_toggle_button(iWindowHandle: int) -> None:
         win32con.WS_EX_NOPARENTNOTIFY,
         "BUTTON",
         "ON",
-        win32con.WS_TABSTOP | win32con.WS_VISIBLE | win32con.WS_CHILD,
+        win32con.WS_TABSTOP | win32con.WS_VISIBLE | win32con.WS_CHILD | win32con.BS_OWNERDRAW,
         0,
         0,
         TOPMOST_TOGGLE_BUTTON_SIZE,
@@ -2306,6 +2306,11 @@ def window_proc(
 
     if iMessage == win32con.WM_DRAWITEM:
         objDrawItem = DRAWITEMSTRUCT.from_address(iLparam)
+        if (
+            objDrawItem.hwndItem not in g_action_button_handles
+            and objDrawItem.hwndItem != g_topmost_toggle_button_handle
+        ):
+            return win32gui.DefWindowProc(iWindowHandle, iMessage, iWparam, iLparam)
         iDeviceContextHandle = objDrawItem.hDC
         iLeft = objDrawItem.rcItem.left
         iTop = objDrawItem.rcItem.top
@@ -2396,7 +2401,7 @@ def window_proc(
     if iMessage == win32con.WM_CTLCOLORBTN:
         iDeviceContextHandle: int = iWparam
         iControlHandle: int = iLparam
-        if iControlHandle in g_action_button_handles:
+        if iControlHandle in g_action_button_handles or iControlHandle == g_topmost_toggle_button_handle:
             win32gui.SetBkMode(iDeviceContextHandle, win32con.TRANSPARENT)
             win32gui.SetTextColor(iDeviceContextHandle, win32api.RGB(0, 0, 0))
             objBrushHandle = ensure_action_button_brush()
