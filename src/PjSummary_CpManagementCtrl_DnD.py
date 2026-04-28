@@ -2336,6 +2336,11 @@ def window_proc(
 
     if iMessage == win32con.WM_DRAWITEM:
         objDrawItem = DRAWITEMSTRUCT.from_address(iLparam)
+        if (
+            objDrawItem.hwndItem not in g_action_button_handles
+            and objDrawItem.hwndItem != g_topmost_toggle_button_handle
+        ):
+            return win32gui.DefWindowProc(iWindowHandle, iMessage, iWparam, iLparam)
         iDeviceContextHandle = objDrawItem.hDC
         iLeft = objDrawItem.rcItem.left
         iTop = objDrawItem.rcItem.top
