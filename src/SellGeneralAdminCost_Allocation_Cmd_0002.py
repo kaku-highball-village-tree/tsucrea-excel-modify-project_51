@@ -28,10 +28,11 @@ import sys
 import csv
 import inspect
 import warnings
+import traceback
 from datetime import datetime
 from copy import copy
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from uuid import uuid4
 from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Border, Side
@@ -56,7 +57,178 @@ PERIOD_BUTTON_ID_BASE: int = 1001
 PERIOD_BUTTON_ID_OFFSET: int = 0
 BN_DOUBLECLICKED: int = 5
 DATE_SERIAL_WARNING_RECORDS: List[Dict[str, str]] = []
+TRACE_RUN_ID: str = datetime.now().strftime("%Y%m%d%H%M%S") + "-" + uuid4().hex[:8]
+TRACE_READ_FILE_HISTORY: List[Dict[str, str]] = []
+TRACE_STATE: Dict[str, str] = {
+    "current_phase": "startup",
+    "current_function": "unknown",
+    "current_pair_index": "",
+    "current_pair_count": "",
+    "current_manhour_file": "",
+    "current_pl_file": "",
+    "current_read_index": "0",
+    "current_read_file": "",
+    "current_workbook_path": "",
+    "last_read_file": "",
+    "last_open_workbook": "",
+}
 _ORIGINAL_SHOWWARNING = warnings.showwarning
+_ORIGINAL_EXCEPTHOOK = sys.excepthook
+
+
+def get_trace_log_path() -> str:
+    pszDirectory: str = EXECUTION_ROOT_DIRECTORY or get_script_base_directory()
+    return os.path.join(
+        pszDirectory,
+        "SellGeneralAdminCost_Allocation_Cmd_0002_trace.log.txt",
+    )
+
+
+def _format_trace_value(objValue: object) -> str:
+    pszText: str = str(objValue)
+    return pszText.replace("\r", "\\r").replace("\n", "\\n")
+
+
+def write_trace_log(pszLevel: str, pszEvent: str, objFields: Optional[Dict[str, object]] = None) -> None:
+    try:
+        pszTimestamp: str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        objParts: List[str] = [
+            f"[{pszTimestamp}]",
+            pszLevel,
+            f"run_id={TRACE_RUN_ID}",
+            pszEvent,
+        ]
+        if objFields:
+            for pszKey, objValue in objFields.items():
+                objParts.append(f"{pszKey}={_format_trace_value(objValue)}")
+        pszTraceLogPath: str = get_trace_log_path()
+        os.makedirs(os.path.dirname(pszTraceLogPath), exist_ok=True)
+        with open(pszTraceLogPath, "a", encoding="utf-8", newline="\n") as objLogFile:
+            objLogFile.write(" ".join(objParts) + "\n")
+    except Exception:
+        return
+
+
+def update_trace_state(**objFields: object) -> None:
+    for pszKey, objValue in objFields.items():
+        TRACE_STATE[pszKey] = "" if objValue is None else str(objValue)
+
+
+def start_trace_read(pszReadType: str, pszPhase: str, pszPath: str) -> int:
+    iReadIndex: int = len(TRACE_READ_FILE_HISTORY) + 1
+    update_trace_state(
+        current_phase=pszPhase,
+        current_function=pszPhase,
+        current_read_index=iReadIndex,
+        current_read_file=pszPath,
+        last_read_file=pszPath,
+    )
+    TRACE_READ_FILE_HISTORY.append(
+        {
+            "read_index": str(iReadIndex),
+            "read_type": pszReadType,
+            "phase": pszPhase,
+            "path": pszPath,
+            "result": "START",
+        }
+    )
+    write_trace_log(
+        "INFO",
+        "READ_FILE_START",
+        {
+            "READ_INDEX": iReadIndex,
+            "READ_TYPE": pszReadType,
+            "PHASE": pszPhase,
+            "PATH": pszPath,
+            "CURRENT_PAIR_INDEX": TRACE_STATE.get("current_pair_index", ""),
+        },
+    )
+    return iReadIndex
+
+
+def finish_trace_read(iReadIndex: int, pszResult: str, objFields: Optional[Dict[str, object]] = None) -> None:
+    pszPath: str = TRACE_STATE.get("current_read_file", "")
+    if 1 <= iReadIndex <= len(TRACE_READ_FILE_HISTORY):
+        TRACE_READ_FILE_HISTORY[iReadIndex - 1]["result"] = pszResult
+        pszPath = TRACE_READ_FILE_HISTORY[iReadIndex - 1].get("path", pszPath)
+    objLogFields: Dict[str, object] = {
+        "READ_INDEX": iReadIndex,
+        "RESULT": pszResult,
+        "PATH": pszPath,
+    }
+    if objFields:
+        objLogFields.update(objFields)
+    write_trace_log("INFO" if pszResult == "OK" else "ERROR", "READ_FILE_END", objLogFields)
+
+
+def trace_load_workbook(pszPath: str, pszPhase: str, *args: Any, **kwargs: Any) -> Any:
+    iReadIndex: int = start_trace_read("XLSX", pszPhase, pszPath)
+    update_trace_state(
+        current_workbook_path=pszPath,
+        last_open_workbook=pszPath,
+    )
+    write_trace_log(
+        "INFO",
+        "OPEN_WORKBOOK_START",
+        {
+            "READ_INDEX": iReadIndex,
+            "PHASE": pszPhase,
+            "PATH": pszPath,
+            "CURRENT_PAIR_INDEX": TRACE_STATE.get("current_pair_index", ""),
+        },
+    )
+    try:
+        objWorkbook = load_workbook(pszPath, *args, **kwargs)
+    except Exception as exc:
+        finish_trace_read(
+            iReadIndex,
+            "ERROR",
+            {
+                "PHASE": pszPhase,
+                "EXCEPTION_TYPE": type(exc).__name__,
+                "EXCEPTION_MESSAGE": str(exc),
+            },
+        )
+        raise
+    finish_trace_read(
+        iReadIndex,
+        "OK",
+        {
+            "PHASE": pszPhase,
+            "SHEET_COUNT": len(objWorkbook.worksheets),
+        },
+    )
+    write_trace_log(
+        "INFO",
+        "OPEN_WORKBOOK_END",
+        {
+            "READ_INDEX": iReadIndex,
+            "PHASE": pszPhase,
+            "PATH": pszPath,
+            "SHEET_COUNT": len(objWorkbook.worksheets),
+        },
+    )
+    return objWorkbook
+
+
+def trace_unhandled_exception(objExcType, objExcValue, objTraceback) -> None:
+    write_trace_log(
+        "ERROR",
+        "UNHANDLED_EXCEPTION",
+        {
+            "EXCEPTION_TYPE": getattr(objExcType, "__name__", str(objExcType)),
+            "EXCEPTION_MESSAGE": str(objExcValue),
+            "LAST_PHASE": TRACE_STATE.get("current_phase", ""),
+            "LAST_READ_FILE": TRACE_STATE.get("last_read_file", ""),
+            "LAST_OPEN_WORKBOOK": TRACE_STATE.get("last_open_workbook", ""),
+            "READ_FILE_COUNT": len(TRACE_READ_FILE_HISTORY),
+            "TRACEBACK": "".join(traceback.format_exception(objExcType, objExcValue, objTraceback)),
+        },
+    )
+    _ORIGINAL_EXCEPTHOOK(objExcType, objExcValue, objTraceback)
+
+
+sys.excepthook = trace_unhandled_exception
 
 
 def _extract_date_serial_warning_record(pszMessage: str) -> Optional[Dict[str, str]]:
@@ -92,7 +264,28 @@ def _capture_date_serial_warning(
     if objRecord is not None:
         objRecord["warning_category"] = category.__name__
         objRecord["warning_source"] = f"{filename}:{lineno}"
+        objRecord["workbook_path"] = TRACE_STATE.get("current_workbook_path", "")
+        objRecord["phase"] = TRACE_STATE.get("current_phase", "")
+        objRecord["read_index"] = TRACE_STATE.get("current_read_index", "")
+        objRecord["current_pair_index"] = TRACE_STATE.get("current_pair_index", "")
+        objRecord["manhour_file"] = TRACE_STATE.get("current_manhour_file", "")
+        objRecord["pl_file"] = TRACE_STATE.get("current_pl_file", "")
+        objRecord["warning_timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         DATE_SERIAL_WARNING_RECORDS.append(objRecord)
+        write_trace_log(
+            "WARNING",
+            "OPENPYXL_DATE_SERIAL_OUT_OF_RANGE",
+            {
+                "READ_INDEX": objRecord.get("read_index", ""),
+                "CURRENT_WORKBOOK": objRecord.get("workbook_path", ""),
+                "PHASE": objRecord.get("phase", ""),
+                "FUNCTION": objRecord.get("function", ""),
+                "CELL": objRecord.get("cell", ""),
+                "SERIAL_VALUE": objRecord.get("serial_value", ""),
+                "WARNING_SOURCE": objRecord.get("warning_source", ""),
+                "MESSAGE": objRecord.get("message", ""),
+            },
+        )
     _ORIGINAL_SHOWWARNING(message, category, filename, lineno, file=file, line=line)
 
 
@@ -1061,9 +1254,9 @@ def insert_step0006_rows_into_group_summary_excel(
     if not os.path.isfile(pszTemplatePath):
         return
     if os.path.isfile(pszOutputPath):
-        objWorkbook = load_workbook(pszOutputPath)
+        objWorkbook = trace_load_workbook(pszOutputPath, "insert_step0006_rows_into_group_summary_excel.output")
     else:
-        objWorkbook = load_workbook(pszTemplatePath)
+        objWorkbook = trace_load_workbook(pszTemplatePath, "insert_step0006_rows_into_group_summary_excel.template")
     if pszSheetName not in objWorkbook.sheetnames:
         pszSourceSheetName: str = "Sheet1" if objStart[1] == 4 else "Sheet2"
         if pszSourceSheetName in objWorkbook.sheetnames:
@@ -1107,9 +1300,9 @@ def insert_step0006_rows_into_company_summary_excel(
     if not os.path.isfile(pszTemplatePath):
         return
     if os.path.isfile(pszOutputPath):
-        objWorkbook = load_workbook(pszOutputPath)
+        objWorkbook = trace_load_workbook(pszOutputPath, "insert_step0006_rows_into_company_summary_excel.output")
     else:
-        objWorkbook = load_workbook(pszTemplatePath)
+        objWorkbook = trace_load_workbook(pszTemplatePath, "insert_step0006_rows_into_company_summary_excel.template")
     if pszSheetName not in objWorkbook.sheetnames:
         pszSourceSheetName: str = "Sheet1" if objStart[1] == 4 else "Sheet2"
         if pszSourceSheetName in objWorkbook.sheetnames:
@@ -6635,7 +6828,7 @@ def create_pj_summary_gross_profit_ranking_excel(pszDirectory: str) -> Optional[
     )
     if not os.path.isfile(pszTemplatePath):
         return None
-    objWorkbook = load_workbook(pszTemplatePath)
+    objWorkbook = trace_load_workbook(pszTemplatePath, "create_pj_gross_profit_ranking_excel.template")
     objSheet = objWorkbook.worksheets[0]
     objSheet.title = "PJ別粗利金額ランキング"
     objRows = read_tsv_rows(pszInputPath)
@@ -6822,7 +7015,7 @@ def create_pj_summary_sales_cost_sg_admin_margin_excel(pszDirectory: str) -> Opt
     )
     if not os.path.isfile(pszTemplatePath):
         return None
-    objWorkbook = load_workbook(pszTemplatePath)
+    objWorkbook = trace_load_workbook(pszTemplatePath, "create_pj_sales_cost_profit_rate_excel.template")
     objTemplateSheet = objWorkbook.worksheets[0]
     for objSheetToRemove in objWorkbook.worksheets[1:]:
         objWorkbook.remove(objSheetToRemove)
@@ -6905,7 +7098,7 @@ def create_pj_summary_pl_cr_manhour_excel(
     )
     if not os.path.isfile(pszTemplatePath):
         return None
-    objWorkbook = load_workbook(pszTemplatePath)
+    objWorkbook = trace_load_workbook(pszTemplatePath, "create_project_summary_excel.template")
     objSheet = objWorkbook.worksheets[0]
     objSheetNameMatch = objSheetNamePattern.match(pszProjectName)
     if objSheetNameMatch:
@@ -6983,7 +7176,7 @@ def create_pj_summary_pl_cr_manhour_all_project_excel(
     if not os.path.isfile(pszTemplatePath):
         return None
 
-    objWorkbook = load_workbook(pszTemplatePath)
+    objWorkbook = trace_load_workbook(pszTemplatePath, "create_all_project_summary_excel.template")
     objTemplateSheet = objWorkbook.worksheets[0]
 
     for iIndex, objProjectInput in enumerate(objValidInputs):
@@ -7203,7 +7396,7 @@ def create_step0010_pj_income_statement_excel_from_tsv(
     if not os.path.isfile(pszTemplatePath):
         return None
 
-    objWorkbook = load_workbook(pszTemplatePath)
+    objWorkbook = trace_load_workbook(pszTemplatePath, "create_step0010_pj_income_statement_excel.template")
     objSheet = objWorkbook.worksheets[0]
     objSheet.title = f"PJ別損益計算書_{pszYearMonth}"
     objRows = read_tsv_rows(pszStep0010Path)
@@ -7260,7 +7453,7 @@ def create_step0010_pj_income_statement_vertical_excel_from_tsv(
     if not os.path.isfile(pszTemplatePath):
         return None
 
-    objWorkbook = load_workbook(pszTemplatePath)
+    objWorkbook = trace_load_workbook(pszTemplatePath, "create_step0010_pj_income_statement_vertical_excel.template")
     objSheet = objWorkbook.worksheets[0]
     objSheet.title = f"PJ別損益計算書_{pszYearMonth}_vertical"
     objRows = read_tsv_rows(pszStep0010VerticalPath)
@@ -8234,7 +8427,7 @@ def create_all_management_data_excel(pszDirectory: str) -> Optional[str]:
 
     for pszSourcePath in objOrderedSourcePaths:
         write_all_management_log("INFO", f"Open workbook = {pszSourcePath}")
-        objSourceWorkbook = load_workbook(pszSourcePath)
+        objSourceWorkbook = trace_load_workbook(pszSourcePath, "create_all_management_data_excel.source")
         for objSourceSheet in objSourceWorkbook.worksheets:
             write_all_management_log("INFO", f"Copy sheet = {objSourceSheet.title}")
             pszSheetTitle: str = _build_unique_sheet_title(
@@ -8275,8 +8468,8 @@ def create_step0010_pj_income_statement_both_excel(
     )
     shutil.copy2(pszNormalExcelPath, pszOutputPath)
 
-    objBothWorkbook = load_workbook(pszOutputPath)
-    objVerticalWorkbook = load_workbook(pszVerticalExcelPath)
+    objBothWorkbook = trace_load_workbook(pszOutputPath, "create_step0010_pj_income_statement_both_excel.output")
+    objVerticalWorkbook = trace_load_workbook(pszVerticalExcelPath, "create_step0010_pj_income_statement_both_excel.vertical")
     if not objBothWorkbook.worksheets or not objVerticalWorkbook.worksheets:
         return None
 
@@ -8352,7 +8545,7 @@ def create_step0010_pj_income_statement_range_excel_from_tsvs(
     if not os.path.isfile(pszTemplatePath):
         return None
 
-    objWorkbook = load_workbook(pszTemplatePath)
+    objWorkbook = trace_load_workbook(pszTemplatePath, "create_step0010_cumulative_income_statement_excel.template")
     objTemplateSheet = objWorkbook.worksheets[0]
     for objSheetToRemove in objWorkbook.worksheets[1:]:
         objWorkbook.remove(objSheetToRemove)
@@ -9523,7 +9716,7 @@ def create_cp_company_step0009_excel(pszScriptDirectory: str) -> Optional[str]:
     if not os.path.isfile(pszTemplatePath):
         return None
 
-    objWorkbook = load_workbook(pszTemplatePath)
+    objWorkbook = trace_load_workbook(pszTemplatePath, "create_cp_company_management_excel.template")
     objTemplateSheet = objWorkbook.worksheets[0]
     for objSheetToRemove in objWorkbook.worksheets[1:]:
         objWorkbook.remove(objSheetToRemove)
@@ -9596,7 +9789,7 @@ def create_cp_group_step0009_excel(pszScriptDirectory: str) -> Optional[str]:
     if not os.path.isfile(pszTemplatePath):
         return None
 
-    objWorkbook = load_workbook(pszTemplatePath)
+    objWorkbook = trace_load_workbook(pszTemplatePath, "create_cp_group_management_excel.template")
     objTemplateSheet = objWorkbook.worksheets[0]
     for pszPeriodLabel, pszInputPath in objTsvPaths:
         pszSheetTitle = f"経営管理_計上グループ_{pszPeriodLabel}"
@@ -10032,13 +10225,17 @@ def write_main_error_file(
         if DATE_SERIAL_WARNING_RECORDS:
             for objWarning in DATE_SERIAL_WARNING_RECORDS:
                 objLines.append("WARNING_TYPE: OPENPYXL_DATE_SERIAL_OUT_OF_RANGE")
-                objLines.append("FILE: (unknown)")
+                objLines.append(f"FILE: {objWarning.get('workbook_path', '') or '(unknown)'}")
                 objLines.append("SHEET: (unknown)")
                 objLines.append(f"CELL: {objWarning.get('cell', '')}")
                 objLines.append(f"SERIAL_VALUE: {objWarning.get('serial_value', '')}")
                 objLines.append("NUMBER_FORMAT: (unknown)")
                 objLines.append("RAW_VALUE: (unknown)")
                 objLines.append(f"WARNING_MESSAGE: {objWarning.get('message', '')}")
+                objLines.append(f"WARNING_PHASE: {objWarning.get('phase', '')}")
+                objLines.append(f"WARNING_READ_INDEX: {objWarning.get('read_index', '')}")
+                objLines.append(f"WARNING_MANHOUR_FILE: {objWarning.get('manhour_file', '')}")
+                objLines.append(f"WARNING_PL_FILE: {objWarning.get('pl_file', '')}")
                 objLines.append("RESULT: ERROR")
         objLines.extend(
             [
@@ -10052,8 +10249,27 @@ def write_main_error_file(
                 f"RESULT: ERROR (EXIT 1)",
                 f"phase: {pszPhase}",
                 f"reason: {pszReason}",
+                f"TRACE_LOG: {get_trace_log_path()}",
+                f"LAST_PHASE: {TRACE_STATE.get('current_phase', '')}",
+                f"LAST_READ_FILE: {TRACE_STATE.get('last_read_file', '')}",
+                f"LAST_OPEN_WORKBOOK: {TRACE_STATE.get('last_open_workbook', '')}",
+                f"READ_FILE_COUNT: {len(TRACE_READ_FILE_HISTORY)}",
+                f"CURRENT_PAIR_INDEX: {TRACE_STATE.get('current_pair_index', '')}",
+                f"CURRENT_PAIR_COUNT: {TRACE_STATE.get('current_pair_count', '')}",
+                f"CURRENT_MANHOUR_FILE: {TRACE_STATE.get('current_manhour_file', '')}",
+                f"CURRENT_PL_FILE: {TRACE_STATE.get('current_pl_file', '')}",
+                f"OPENPYXL_WARNING_COUNT: {len(DATE_SERIAL_WARNING_RECORDS)}",
             ]
         )
+        for objReadRecord in TRACE_READ_FILE_HISTORY:
+            objLines.append(
+                "READ_FILE: "
+                + f"INDEX={objReadRecord.get('read_index', '')};"
+                + f"TYPE={objReadRecord.get('read_type', '')};"
+                + f"PHASE={objReadRecord.get('phase', '')};"
+                + f"RESULT={objReadRecord.get('result', '')};"
+                + f"PATH={objReadRecord.get('path', '')}"
+            )
         if pszDetail.strip():
             objLines.append(f"detail: {pszDetail}")
         objLines.append("stderr:")
@@ -10073,6 +10289,25 @@ def fail_main_with_error(
     pszReason: str,
     pszDetail: str = "",
 ) -> int:
+    update_trace_state(current_phase=pszPhase)
+    write_trace_log(
+        "ERROR",
+        "RUN_FAIL",
+        {
+            "RETURN_CODE": 1,
+            "PHASE": pszPhase,
+            "REASON": pszReason,
+            "DETAIL": pszDetail,
+            "LAST_PHASE": TRACE_STATE.get("current_phase", ""),
+            "LAST_READ_FILE": TRACE_STATE.get("last_read_file", ""),
+            "LAST_OPEN_WORKBOOK": TRACE_STATE.get("last_open_workbook", ""),
+            "READ_FILE_COUNT": len(TRACE_READ_FILE_HISTORY),
+            "CURRENT_PAIR_INDEX": TRACE_STATE.get("current_pair_index", ""),
+            "CURRENT_MANHOUR_FILE": TRACE_STATE.get("current_manhour_file", ""),
+            "CURRENT_PL_FILE": TRACE_STATE.get("current_pl_file", ""),
+            "OPENPYXL_WARNING_COUNT": len(DATE_SERIAL_WARNING_RECORDS),
+        },
+    )
     pszFunctionName: str = "unknown"
     pszCallPath: str = "unknown"
     pszSourceLocation: str = "unknown"
@@ -10095,13 +10330,46 @@ def fail_main_with_error(
 
 
 def main(argv: list[str]) -> int:
+    global TRACE_RUN_ID
     DATE_SERIAL_WARNING_RECORDS.clear()
+    TRACE_READ_FILE_HISTORY.clear()
+    TRACE_RUN_ID = datetime.now().strftime("%Y%m%d%H%M%S") + "-" + uuid4().hex[:8]
+    update_trace_state(
+        current_phase="main.start",
+        current_function="main",
+        current_pair_index="",
+        current_pair_count="",
+        current_manhour_file="",
+        current_pl_file="",
+        current_read_index="0",
+        current_read_file="",
+        current_workbook_path="",
+        last_read_file="",
+        last_open_workbook="",
+    )
+    write_trace_log(
+        "INFO",
+        "RUN_START",
+        {
+            "SCRIPT": os.path.basename(argv[0]) if argv else "",
+            "COMMAND": " ".join(argv),
+            "ARGV_COUNT": len(argv),
+        },
+    )
     if len(argv) < 3:
         print_usage()
         return fail_main_with_error("arg_validation", "引数不足です。")
 
     objCsvInputs: List[str] = [pszPath for pszPath in argv[1:] if pszPath.lower().endswith(".csv")]
     objTsvInputs: List[str] = [pszPath for pszPath in argv[1:] if pszPath.lower().endswith(".tsv")]
+    objInputFields: Dict[str, object] = {
+        "CSV_INPUT_COUNT": len(objCsvInputs),
+        "TSV_INPUT_COUNT": len(objTsvInputs),
+        "RAW_ARG_COUNT": max(len(argv) - 1, 0),
+    }
+    for iArgIndex, pszArg in enumerate(argv[1:], start=1):
+        objInputFields[f"RAW_ARG[{iArgIndex}]"] = pszArg
+    write_trace_log("INFO", "INPUT_CLASSIFICATION", objInputFields)
 
     if objCsvInputs and objTsvInputs:
         print(
@@ -10126,6 +10394,11 @@ def main(argv: list[str]) -> int:
         return fail_main_with_error("arg_validation", "引数不足です。")
 
     create_execution_folders()
+    write_trace_log(
+        "INFO",
+        "EXECUTION_ROOT_CREATED",
+        {"EXECUTION_ROOT_DIRECTORY": EXECUTION_ROOT_DIRECTORY or ""},
+    )
     CREATED_FILE_PATHS.clear()
 
     if len(objArgv) == 4:
@@ -10181,6 +10454,18 @@ def main(argv: list[str]) -> int:
         if objMonthPl is not None and objMonthManhour is not None and objMonthPl != objMonthManhour:
             objMonth = None
         objPairsWithMonths.append((pszManhourPath, pszPlPath, objMonth))
+        write_trace_log(
+            "INFO",
+            "PAIR_DETECTED",
+            {
+                "PAIR_INDEX": len(objPairsWithMonths),
+                "MANHOUR_FILE": pszManhourPath,
+                "PL_FILE": pszPlPath,
+                "MANHOUR_MONTH": f"{objMonthManhour[0]:04d}-{objMonthManhour[1]:02d}" if objMonthManhour is not None else "",
+                "PL_MONTH": f"{objMonthPl[0]:04d}-{objMonthPl[1]:02d}" if objMonthPl is not None else "",
+                "PAIR_MONTH_RESULT": f"{objMonth[0]:04d}-{objMonth[1]:02d}" if objMonth is not None else "",
+            },
+        )
         if objMonth is not None:
             objParsedMonths.append(objMonth)
 
@@ -10221,10 +10506,37 @@ def main(argv: list[str]) -> int:
     record_created_file(pszRangePathSelected)
 
     objPairs = objSelectedPairs
+    write_trace_log(
+        "INFO",
+        "SELECTED_RANGE",
+        {
+            "START": f"{objSelectedRange[0][0]:04d}-{objSelectedRange[0][1]:02d}",
+            "END": f"{objSelectedRange[1][0]:04d}-{objSelectedRange[1][1]:02d}",
+            "SELECTED_PAIR_COUNT": len(objPairs),
+        },
+    )
 
-    for objPair in objPairs:
+    for iPairIndex, objPair in enumerate(objPairs, start=1):
         pszManhourPath: str = objPair[0]
         pszPlPath: str = objPair[1]
+        update_trace_state(
+            current_phase="main.process_pair",
+            current_function="main",
+            current_pair_index=iPairIndex,
+            current_pair_count=len(objPairs),
+            current_manhour_file=pszManhourPath,
+            current_pl_file=pszPlPath,
+        )
+        write_trace_log(
+            "INFO",
+            "PROCESS_PAIR_START",
+            {
+                "PAIR_INDEX": iPairIndex,
+                "PAIR_COUNT": len(objPairs),
+                "MANHOUR_FILE": pszManhourPath,
+                "PL_FILE": pszPlPath,
+            },
+        )
         pszOutputPath: str
         if len(objPair) == 3:
             pszOutputPath = objPair[2]
@@ -10241,31 +10553,75 @@ def main(argv: list[str]) -> int:
         pszOutputStep0006Path: str = build_output_path_with_step(pszPlPath, "販管費配賦_step0006_")
         pszOutputStep0010Path: str = build_output_path_with_step(pszPlPath, "販管費配賦_step0010_")
 
-        if not os.path.exists(pszManhourPath):
+        bManhourExists: bool = os.path.exists(pszManhourPath)
+        write_trace_log(
+            "INFO",
+            "INPUT_FILE_CHECK",
+            {"TYPE": "MANHOUR", "PATH": pszManhourPath, "EXISTS": bManhourExists},
+        )
+        if not bManhourExists:
             print(f"Input file not found: {pszManhourPath}")
             return fail_main_with_error("input_check", "工数ファイルが見つかりません。", pszManhourPath)
-        if not os.path.exists(pszPlPath):
+        bPlExists: bool = os.path.exists(pszPlPath)
+        write_trace_log(
+            "INFO",
+            "INPUT_FILE_CHECK",
+            {"TYPE": "PL", "PATH": pszPlPath, "EXISTS": bPlExists},
+        )
+        if not bPlExists:
             print(f"Input file not found: {pszPlPath}")
             return fail_main_with_error("input_check", "損益ファイルが見つかりません。", pszPlPath)
 
-        objManhourMap: Dict[str, str] = load_manhour_map(pszManhourPath)
-        objCompanyMap: Dict[str, str] = load_company_map(pszManhourPath)
-        process_pl_tsv(
-            pszPlPath,
-            pszOutputPath,
-            pszOutputStep0001Path,
-            pszOutputStep0002Path,
-            pszOutputStep0003ZeroPath,
-            pszOutputStep0003Path,
-            pszOutputStep0004Path,
-            pszOutputStep0009Path,
-            pszOutputStep0005Path,
-            pszOutputStep0006Path,
-            pszOutputStep0010Path,
-            pszOutputFinalPath,
-            objManhourMap,
-            objCompanyMap,
-        )
+        iReadIndex = start_trace_read("TSV", "load_manhour_map", pszManhourPath)
+        try:
+            objManhourMap: Dict[str, str] = load_manhour_map(pszManhourPath)
+        except Exception as exc:
+            finish_trace_read(
+                iReadIndex,
+                "ERROR",
+                {"EXCEPTION_TYPE": type(exc).__name__, "EXCEPTION_MESSAGE": str(exc)},
+            )
+            raise
+        finish_trace_read(iReadIndex, "OK", {"MAP_SIZE": len(objManhourMap)})
+
+        iReadIndex = start_trace_read("TSV", "load_company_map", pszManhourPath)
+        try:
+            objCompanyMap: Dict[str, str] = load_company_map(pszManhourPath)
+        except Exception as exc:
+            finish_trace_read(
+                iReadIndex,
+                "ERROR",
+                {"EXCEPTION_TYPE": type(exc).__name__, "EXCEPTION_MESSAGE": str(exc)},
+            )
+            raise
+        finish_trace_read(iReadIndex, "OK", {"MAP_SIZE": len(objCompanyMap)})
+
+        iReadIndex = start_trace_read("TSV", "process_pl_tsv", pszPlPath)
+        try:
+            process_pl_tsv(
+                pszPlPath,
+                pszOutputPath,
+                pszOutputStep0001Path,
+                pszOutputStep0002Path,
+                pszOutputStep0003ZeroPath,
+                pszOutputStep0003Path,
+                pszOutputStep0004Path,
+                pszOutputStep0009Path,
+                pszOutputStep0005Path,
+                pszOutputStep0006Path,
+                pszOutputStep0010Path,
+                pszOutputFinalPath,
+                objManhourMap,
+                objCompanyMap,
+            )
+        except Exception as exc:
+            finish_trace_read(
+                iReadIndex,
+                "ERROR",
+                {"EXCEPTION_TYPE": type(exc).__name__, "EXCEPTION_MESSAGE": str(exc)},
+            )
+            raise
+        finish_trace_read(iReadIndex, "OK")
 
         print(f"Output: {pszOutputStep0001Path}")
         print(f"Output: {pszOutputStep0002Path}")
@@ -10279,12 +10635,24 @@ def main(argv: list[str]) -> int:
         print(f"Output: {pszOutputFinalPath}")
 
     if objPairs:
+        update_trace_state(current_phase="create_step0010_pj_income_statement_excels")
         create_step0010_pj_income_statement_excels(get_script_base_directory())
+        update_trace_state(current_phase="create_cumulative_reports")
         create_cumulative_reports(objPairs[0][1])
         pszAllManagementDirectory: str = (
             EXECUTION_ROOT_DIRECTORY if EXECUTION_ROOT_DIRECTORY else get_script_base_directory()
         )
+        update_trace_state(current_phase="create_all_management_data_excel")
         create_all_management_data_excel(pszAllManagementDirectory)
+    write_trace_log(
+        "INFO",
+        "RUN_END",
+        {
+            "RESULT": "OK_WITH_WARNINGS" if DATE_SERIAL_WARNING_RECORDS else "OK",
+            "READ_FILE_COUNT": len(TRACE_READ_FILE_HISTORY),
+            "OPENPYXL_WARNING_COUNT": len(DATE_SERIAL_WARNING_RECORDS),
+        },
+    )
     return 0
 
 
