@@ -2148,6 +2148,168 @@ def move_pj_summary_tsv_files_to_temp_subfolders(pszBaseDirectory: str) -> None:
             shutil.move(pszSourcePath, pszDestinationPath)
 
 
+def write_drag_and_drop_manhour_error_log(
+    pszBaseDirectory: str,
+    pszLevel: str,
+    pszEvent: str,
+    objFields: Optional[Dict[str, object]] = None,
+) -> None:
+    try:
+        pszLogPath: str = os.path.join(
+            pszBaseDirectory,
+            "DragAndDropManhourAndPl_error_log.txt",
+        )
+        pszTimestamp: str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        objLines: List[str] = [f"[{pszTimestamp}] {pszLevel} {pszEvent}"]
+        if objFields:
+            for pszKey, objValue in objFields.items():
+                objLines.append(f"{pszKey}: {_format_trace_value(objValue)}")
+        with open(pszLogPath, "a", encoding="utf-8", newline="\n") as objLogFile:
+            objLogFile.write("\n".join(objLines) + "\n")
+    except Exception:
+        return
+
+
+def build_drag_and_drop_manhour_copy_destination_path(
+    pszDestinationPath: str,
+) -> str:
+    if not os.path.exists(pszDestinationPath):
+        return pszDestinationPath
+
+    pszParentDirectory: str = os.path.dirname(pszDestinationPath)
+    pszTimestamp: str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    pszBaseName: str = os.path.basename(pszDestinationPath)
+    pszCandidatePath: str = os.path.join(
+        pszParentDirectory,
+        f"{pszBaseName}_copy_{pszTimestamp}",
+    )
+    if not os.path.exists(pszCandidatePath):
+        return pszCandidatePath
+
+    iSuffix: int = 2
+    while True:
+        pszCandidatePath = os.path.join(
+            pszParentDirectory,
+            f"{pszBaseName}_copy_{pszTimestamp}_{iSuffix}",
+        )
+        if not os.path.exists(pszCandidatePath):
+            return pszCandidatePath
+        iSuffix += 1
+
+
+def copy_drag_and_drop_manhour_folder_on_move_error(
+    pszBaseDirectory: str,
+    pszSourcePath: str,
+    pszDestinationPath: str,
+    objMoveError: PermissionError,
+) -> None:
+    pszCopyDestinationPath: str = build_drag_and_drop_manhour_copy_destination_path(
+        pszDestinationPath,
+    )
+    write_drag_and_drop_manhour_error_log(
+        pszBaseDirectory,
+        "WARNING",
+        "COPY_FALLBACK_START",
+        {
+            "FOLDER": "DragAndDropManhourAndPl",
+            "SOURCE": pszSourcePath,
+            "DESTINATION": pszDestinationPath,
+            "COPY_DESTINATION": pszCopyDestinationPath,
+            "SOURCE_EXISTS": os.path.isdir(pszSourcePath),
+            "DESTINATION_EXISTS": os.path.exists(pszDestinationPath),
+            "MOVE_ERROR_TYPE": type(objMoveError).__name__,
+            "MOVE_ERROR_MESSAGE": str(objMoveError),
+        },
+    )
+    try:
+        shutil.copytree(pszSourcePath, pszCopyDestinationPath)
+    except Exception as objCopyError:
+        write_drag_and_drop_manhour_error_log(
+            pszBaseDirectory,
+            "WARNING",
+            "COPY_FALLBACK_FAILED",
+            {
+                "FOLDER": "DragAndDropManhourAndPl",
+                "SOURCE": pszSourcePath,
+                "DESTINATION": pszDestinationPath,
+                "COPY_DESTINATION": pszCopyDestinationPath,
+                "ERROR_TYPE": type(objCopyError).__name__,
+                "ERROR_MESSAGE": str(objCopyError),
+                "ACTION": "skipped_and_continued",
+            },
+        )
+        return
+
+    write_drag_and_drop_manhour_error_log(
+        pszBaseDirectory,
+        "WARNING",
+        "COPY_FALLBACK_SUCCESS",
+        {
+            "FOLDER": "DragAndDropManhourAndPl",
+            "SOURCE": pszSourcePath,
+            "DESTINATION": pszDestinationPath,
+            "COPY_DESTINATION": pszCopyDestinationPath,
+            "SOURCE_REMAINS": os.path.isdir(pszSourcePath),
+            "ACTION": "continued",
+        },
+    )
+
+
+def move_drag_and_drop_manhour_folder_to_temp(
+    pszBaseDirectory: str,
+    pszSourcePath: str,
+    pszDestinationPath: str,
+) -> None:
+    write_drag_and_drop_manhour_error_log(
+        pszBaseDirectory,
+        "INFO",
+        "MOVE_FOLDER_START",
+        {
+            "FOLDER": "DragAndDropManhourAndPl",
+            "SOURCE": pszSourcePath,
+            "DESTINATION": pszDestinationPath,
+            "SOURCE_EXISTS": os.path.isdir(pszSourcePath),
+            "DESTINATION_EXISTS": os.path.exists(pszDestinationPath),
+        },
+    )
+    try:
+        if os.path.isdir(pszDestinationPath):
+            shutil.rmtree(pszDestinationPath)
+        shutil.move(pszSourcePath, pszDestinationPath)
+    except PermissionError as objMoveError:
+        write_drag_and_drop_manhour_error_log(
+            pszBaseDirectory,
+            "WARNING",
+            "MOVE_FOLDER_PERMISSION_ERROR",
+            {
+                "FOLDER": "DragAndDropManhourAndPl",
+                "SOURCE": pszSourcePath,
+                "DESTINATION": pszDestinationPath,
+                "ERROR_TYPE": type(objMoveError).__name__,
+                "ERROR_MESSAGE": str(objMoveError),
+                "ACTION": "copy_fallback_start",
+            },
+        )
+        copy_drag_and_drop_manhour_folder_on_move_error(
+            pszBaseDirectory,
+            pszSourcePath,
+            pszDestinationPath,
+            objMoveError,
+        )
+        return
+
+    write_drag_and_drop_manhour_error_log(
+        pszBaseDirectory,
+        "INFO",
+        "MOVE_FOLDER_SUCCESS",
+        {
+            "FOLDER": "DragAndDropManhourAndPl",
+            "SOURCE": pszSourcePath,
+            "DESTINATION": pszDestinationPath,
+        },
+    )
+
+
 def move_cp_step_folders_to_temp(pszBaseDirectory: str) -> None:
     pszTempDirectory: str = os.path.join(pszBaseDirectory, "temp")
     os.makedirs(pszTempDirectory, exist_ok=True)
@@ -2183,6 +2345,13 @@ def move_cp_step_folders_to_temp(pszBaseDirectory: str) -> None:
         if not os.path.isdir(pszSourcePath):
             continue
         pszDestinationPath: str = os.path.join(pszTempDirectory, pszFolderName)
+        if pszFolderName == "DragAndDropManhourAndPl":
+            move_drag_and_drop_manhour_folder_to_temp(
+                pszBaseDirectory,
+                pszSourcePath,
+                pszDestinationPath,
+            )
+            continue
         if os.path.isdir(pszDestinationPath):
             shutil.rmtree(pszDestinationPath)
         shutil.move(pszSourcePath, pszDestinationPath)
