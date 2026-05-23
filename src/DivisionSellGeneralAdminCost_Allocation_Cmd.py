@@ -699,6 +699,93 @@ def create_step0005_from_period_paths(objPeriodPaths: List[str]) -> List[str]:
     return objStep0005Paths
 
 
+def load_jurisdiction_master() -> Dict[str, Tuple[str, str]]:
+    pszBaseDirectory: str = os.path.dirname(__file__)
+    pszTsvPath: str = os.path.join(pszBaseDirectory, "管轄PJ表.tsv")
+    pszCsvPath: str = os.path.join(pszBaseDirectory, "管轄PJ表.csv")
+    pszInputPath: str = pszTsvPath if os.path.isfile(pszTsvPath) else pszCsvPath
+    if not os.path.isfile(pszInputPath):
+        return {}
+
+    pszDelimiter: str = "\t" if pszInputPath.lower().endswith(".tsv") else ","
+    with open(pszInputPath, "r", encoding="utf-8", newline="") as objInputFile:
+        objRows: List[List[str]] = list(csv.reader(objInputFile, delimiter=pszDelimiter))
+    if not objRows:
+        return {}
+    objHeader: List[str] = objRows[0]
+    try:
+        iCodeIndex: int = objHeader.index("PJコード")
+        iCompanyIndex: int = objHeader.index("計上カンパニー")
+        iGroupIndex: int = objHeader.index("計上グループ")
+    except ValueError:
+        return {}
+
+    objMaster: Dict[str, Tuple[str, str]] = {}
+    for objRow in objRows[1:]:
+        if iCodeIndex >= len(objRow):
+            continue
+        pszCode: str = objRow[iCodeIndex].strip()
+        if pszCode == "" or pszCode in objMaster:
+            continue
+        pszCompany: str = objRow[iCompanyIndex].strip() if iCompanyIndex < len(objRow) else ""
+        pszGroup: str = objRow[iGroupIndex].strip() if iGroupIndex < len(objRow) else ""
+        objMaster[pszCode] = (pszCompany, pszGroup)
+    return objMaster
+
+
+def build_step0006_output_file_name(pszStep0005BaseName: str, pszSuffix: str) -> Optional[str]:
+    objMatch = re.fullmatch(
+        r"損益計算書_step0005_(\d{4}年\d{2}月-\d{4}年\d{2}月)_A∪B_C∪D_Div販管費_vertical\.tsv",
+        pszStep0005BaseName,
+    )
+    if objMatch is None:
+        return None
+    return f"損益計算書_step0006_{objMatch.group(1)}_A∪B_C∪D_Div販管費_{pszSuffix}_vertical.tsv"
+
+
+def create_step0006_from_step0005_paths(objStep0005Paths: List[str]) -> Tuple[List[str], List[str]]:
+    objMaster: Dict[str, Tuple[str, str]] = load_jurisdiction_master()
+    if not objMaster:
+        return [], []
+
+    objDivPaths: List[str] = []
+    objGrpPaths: List[str] = []
+    for pszStep0005Path in objStep0005Paths:
+        with open(pszStep0005Path, "r", encoding="utf-8", newline="") as objInputFile:
+            objRows: List[List[str]] = list(csv.reader(objInputFile, delimiter="\t"))
+
+        objDivRows: List[List[str]] = [list(objRow) for objRow in objRows]
+        objGrpRows: List[List[str]] = [list(objRow) for objRow in objRows]
+        for iRowIndex in range(1, len(objRows)):
+            pszFirstColumn: str = objRows[iRowIndex][0] if len(objRows[iRowIndex]) >= 1 else ""
+            pszCode: Optional[str] = extract_project_code(pszFirstColumn)
+            if pszCode is None or pszCode not in objMaster:
+                continue
+            pszCompany, pszGroup = objMaster[pszCode]
+            if len(objDivRows[iRowIndex]) == 0:
+                objDivRows[iRowIndex].append("")
+            if len(objGrpRows[iRowIndex]) == 0:
+                objGrpRows[iRowIndex].append("")
+            objDivRows[iRowIndex][0] = pszCompany
+            objGrpRows[iRowIndex][0] = pszGroup
+
+        pszBaseName: str = os.path.basename(pszStep0005Path)
+        pszDivBaseName: Optional[str] = build_step0006_output_file_name(pszBaseName, "Div")
+        pszGrpBaseName: Optional[str] = build_step0006_output_file_name(pszBaseName, "Grp")
+        if pszDivBaseName is None or pszGrpBaseName is None:
+            continue
+
+        pszDivOutputPath: str = os.path.join(os.path.dirname(pszStep0005Path), pszDivBaseName)
+        pszGrpOutputPath: str = os.path.join(os.path.dirname(pszStep0005Path), pszGrpBaseName)
+        with open(pszDivOutputPath, "w", encoding="utf-8", newline="") as objOutputFile:
+            csv.writer(objOutputFile, delimiter="\t", lineterminator="\n").writerows(objDivRows)
+        with open(pszGrpOutputPath, "w", encoding="utf-8", newline="") as objOutputFile:
+            csv.writer(objOutputFile, delimiter="\t", lineterminator="\n").writerows(objGrpRows)
+        objDivPaths.append(pszDivOutputPath)
+        objGrpPaths.append(pszGrpOutputPath)
+    return objDivPaths, objGrpPaths
+
+
 def main() -> int:
     objInputFiles: List[str] = sys.argv[1:]
     if not objInputFiles:
@@ -748,6 +835,13 @@ def main() -> int:
             print(f"Processed step0005 TSV count: {len(objStep0005Paths)}")
             for pszOutputPath in objStep0005Paths:
                 print(f"Output(step0005): {pszOutputPath}")
+            objStep0006DivPaths, objStep0006GrpPaths = create_step0006_from_step0005_paths(objStep0005Paths)
+            print(f"Processed step0006 Div TSV count: {len(objStep0006DivPaths)}")
+            for pszOutputPath in objStep0006DivPaths:
+                print(f"Output(step0006_div): {pszOutputPath}")
+            print(f"Processed step0006 Grp TSV count: {len(objStep0006GrpPaths)}")
+            for pszOutputPath in objStep0006GrpPaths:
+                print(f"Output(step0006_grp): {pszOutputPath}")
         for pszWarningPath in objPeriodWarningPaths:
             print(f"WarningErrorFile: {pszWarningPath}")
         for pszErrorPath in objPeriodErrorPaths:
@@ -839,6 +933,13 @@ def main() -> int:
             print(f"Processed step0005 TSV count: {len(objStep0005Paths)}")
             for pszOutputPath in objStep0005Paths:
                 print(f"Output(step0005): {pszOutputPath}")
+            objStep0006DivPaths, objStep0006GrpPaths = create_step0006_from_step0005_paths(objStep0005Paths)
+            print(f"Processed step0006 Div TSV count: {len(objStep0006DivPaths)}")
+            for pszOutputPath in objStep0006DivPaths:
+                print(f"Output(step0006_div): {pszOutputPath}")
+            print(f"Processed step0006 Grp TSV count: {len(objStep0006GrpPaths)}")
+            for pszOutputPath in objStep0006GrpPaths:
+                print(f"Output(step0006_grp): {pszOutputPath}")
         for pszWarningPath in objPeriodWarningPaths:
             print(f"WarningErrorFile: {pszWarningPath}")
         for pszErrorPath in objPeriodErrorPaths:
