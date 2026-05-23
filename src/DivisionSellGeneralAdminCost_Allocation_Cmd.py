@@ -30,7 +30,7 @@ def build_output_file_name(pszInputBaseName: str) -> Optional[str]:
         return None
     iYear: str = objMatch.group(1)
     iMonth: str = objMatch.group(2)
-    return f"損益計算書_{iYear}年{iMonth}月_A∪B_C∪D_Div販管費_vertical.tsv"
+    return f"損益計算書_step0001_{iYear}年{iMonth}月_A∪B_C∪D_Div販管費_vertical.tsv"
 
 
 def find_target_column_index(objHeader: List[str]) -> Optional[int]:
