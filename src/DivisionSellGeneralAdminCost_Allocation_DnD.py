@@ -9,6 +9,7 @@ DivisionSellGeneralAdminCost_Allocation_Cmd.py を実行するGUI。
 from __future__ import annotations
 
 import ctypes
+from datetime import datetime
 import os
 import subprocess
 import sys
@@ -182,7 +183,77 @@ def run_division_sell_general_admin_cost_allocation(
     pszStdOut: str = objResult.stdout.strip()
     if pszStdOut == "":
         pszStdOut = "DivisionSellGeneralAdminCost_Allocation_Cmd.py finished successfully."
-    show_message_box(pszStdOut, "DivisionSellGeneralAdminCost_Allocation_DnD")
+
+    objStdOutLines: List[str] = [pszLine.strip() for pszLine in pszStdOut.splitlines() if pszLine.strip() != ""]
+    iStep0001Count: int = 0
+    iStep0002Count: int = 0
+    iStep0003Count: int = 0
+    iWarningCount: int = 0
+    objOutputDirectories: List[str] = []
+    objSeenDirectories = set()
+    for pszLine in objStdOutLines:
+        if pszLine.startswith("Processed PL TSV count:"):
+            try:
+                iStep0001Count = int(pszLine.split(":", 1)[1].strip())
+            except ValueError:
+                iStep0001Count = 0
+        elif pszLine.startswith("Processed step0002 TSV count:"):
+            try:
+                iStep0002Count = int(pszLine.split(":", 1)[1].strip())
+            except ValueError:
+                iStep0002Count = 0
+        elif pszLine.startswith("Processed step0003 TSV count:"):
+            try:
+                iStep0003Count = int(pszLine.split(":", 1)[1].strip())
+            except ValueError:
+                iStep0003Count = 0
+        elif pszLine.startswith("Warning error file count:"):
+            try:
+                iWarningCount = int(pszLine.split(":", 1)[1].strip())
+            except ValueError:
+                iWarningCount = 0
+        elif pszLine.startswith("Output("):
+            pszPath = pszLine.split(":", 1)[1].strip() if ":" in pszLine else ""
+            if pszPath != "":
+                pszDirectory: str = os.path.dirname(pszPath)
+                if pszDirectory not in objSeenDirectories:
+                    objOutputDirectories.append(pszDirectory)
+                    objSeenDirectories.add(pszDirectory)
+
+    pszResultPath: str = os.path.join(
+        os.path.dirname(__file__),
+        "DivisionSellGeneralAdminCost_Allocation_DnD_result.txt",
+    )
+    objResultLines: List[str] = [
+        "JOB: DivisionSellGeneralAdminCost_Allocation_DnD.py",
+        "DATE: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        f"INPUT_FILE_COUNT: {len(objFilePaths)}",
+        f"STEP0001_COUNT: {iStep0001Count}",
+        f"STEP0002_COUNT: {iStep0002Count}",
+        f"STEP0003_COUNT: {iStep0003Count}",
+        f"WARNING_ERROR_FILE_COUNT: {iWarningCount}",
+        "",
+        "DETAIL_STDOUT:",
+        pszStdOut,
+    ]
+    with open(pszResultPath, "w", encoding="utf-8", newline="") as objResultFile:
+        objResultFile.write("\n".join(objResultLines) + "\n")
+
+    pszOutputDirectoryText: str = ""
+    if len(objOutputDirectories) == 1:
+        pszOutputDirectoryText = objOutputDirectories[0]
+    elif len(objOutputDirectories) >= 2:
+        pszOutputDirectoryText = "複数フォルダ（詳細は結果一覧を参照）"
+    else:
+        pszOutputDirectoryText = os.path.dirname(__file__)
+
+    pszMessage: str = (
+        "成功しました。\n\n"
+        + f"step0001: {iStep0001Count}件 / step0002: {iStep0002Count}件 / step0003: {iStep0003Count}件\n\n"
+        + f"出力先: {pszOutputDirectoryText}\n\n"
+        + "結果一覧を保存しました。"
+    )
+    show_message_box(pszMessage, "DivisionSellGeneralAdminCost_Allocation_DnD")
     return 0
 
 
