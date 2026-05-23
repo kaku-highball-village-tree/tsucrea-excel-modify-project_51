@@ -562,6 +562,9 @@ def aggregate_step0004_for_periods(objStep0004Paths: List[str]) -> Tuple[List[st
                     objTargetRow.append("")
                 while len(objRow) < iMaxColumns:
                     objRow.append("")
+                if iRowIndex == 0:
+                    objAggregatedRows[iRowIndex] = objTargetRow
+                    continue
                 for iColumnIndex in range(1, iMaxColumns):
                     fLeft = parse_numeric_value(objTargetRow[iColumnIndex], iRowIndex, [])
                     fRightWarnings: List[Dict[str, str]] = []
