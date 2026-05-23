@@ -283,13 +283,19 @@ def process_one_step0002_with_manhour_to_step0003(
         objRows: List[List[str]] = list(objReader)
 
     objOutputRows: List[List[str]] = []
-    for objRow in objRows:
+    for iRowIndex, objRow in enumerate(objRows):
         objNewRow: List[str] = list(objRow)
         while len(objNewRow) < 3:
             objNewRow.append("")
+        if iRowIndex == 0:
+            objNewRow[2] = "工数"
+            objOutputRows.append(objNewRow)
+            continue
         pszProjectCode: Optional[str] = extract_project_code(objNewRow[0] if objNewRow else "")
         if pszProjectCode is not None and pszProjectCode in objManhourMap:
             objNewRow[2] = objManhourMap[pszProjectCode]
+        elif objNewRow[2] == "":
+            objNewRow[2] = "0:00:00"
         objOutputRows.append(objNewRow)
 
     pszOutputPath: str = os.path.join(os.path.dirname(pszStep0002Path), pszOutputBaseName)
