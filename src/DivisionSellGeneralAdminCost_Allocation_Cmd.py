@@ -299,6 +299,34 @@ def process_one_step0002_with_manhour_to_step0003(
     return pszOutputPath
 
 
+def build_year_month_path_map(objPaths: List[str]) -> Dict[str, str]:
+    objMap: Dict[str, str] = {}
+    for pszPath in objPaths:
+        pszYearMonth: Optional[str] = extract_year_month_from_name(os.path.basename(pszPath))
+        if pszYearMonth is None:
+            continue
+        objMap[pszYearMonth] = pszPath
+    return objMap
+
+
+def run_step0003_with_maps(
+    objStep0002Map: Dict[str, str],
+    objManhourMap: Dict[str, str],
+) -> Tuple[List[str], List[str]]:
+    objStep0003OutputPaths: List[str] = []
+    objSkippedYearMonths: List[str] = []
+    for pszYearMonth, pszStep0002Path in sorted(objStep0002Map.items()):
+        if pszYearMonth not in objManhourMap:
+            objSkippedYearMonths.append(pszYearMonth)
+            continue
+        pszStep0003Path: str = process_one_step0002_with_manhour_to_step0003(
+            pszStep0002Path,
+            objManhourMap[pszYearMonth],
+        )
+        objStep0003OutputPaths.append(pszStep0003Path)
+    return objStep0003OutputPaths, objSkippedYearMonths
+
+
 def main() -> int:
     objInputFiles: List[str] = sys.argv[1:]
     if not objInputFiles:
@@ -318,41 +346,24 @@ def main() -> int:
             objManhourInputFiles.append(pszPath)
 
     if objStep0002InputFiles and objManhourInputFiles:
-        objStep0002Map: Dict[str, str] = {}
-        objManhourMap: Dict[str, str] = {}
-        for pszStep0002Path in objStep0002InputFiles:
-            pszYearMonth: Optional[str] = extract_year_month_from_name(os.path.basename(pszStep0002Path))
-            if pszYearMonth is not None:
-                objStep0002Map[pszYearMonth] = pszStep0002Path
-        for pszManhourPath in objManhourInputFiles:
-            pszYearMonth = extract_year_month_from_name(os.path.basename(pszManhourPath))
-            if pszYearMonth is not None:
-                objManhourMap[pszYearMonth] = pszManhourPath
-
-        objStep0003OutputPaths: List[str] = []
-        for pszYearMonth, pszStep0002Path in sorted(objStep0002Map.items()):
-            if pszYearMonth not in objManhourMap:
-                continue
-            try:
-                pszStep0003Path: str = process_one_step0002_with_manhour_to_step0003(
-                    pszStep0002Path,
-                    objManhourMap[pszYearMonth],
-                )
-            except Exception as exc:  # noqa: BLE001
-                print(
-                    f"Error: failed to process step0003 {pszStep0002Path}. Detail = {exc}",
-                    file=sys.stderr,
-                )
-                return 1
-            objStep0003OutputPaths.append(pszStep0003Path)
-
-        if not objStep0003OutputPaths:
-            print("Error: no matching year-month pairs for step0003.", file=sys.stderr)
+        objStep0002Map: Dict[str, str] = build_year_month_path_map(objStep0002InputFiles)
+        objManhourMap: Dict[str, str] = build_year_month_path_map(objManhourInputFiles)
+        try:
+            objStep0003OutputPaths, objSkippedYearMonths = run_step0003_with_maps(
+                objStep0002Map,
+                objManhourMap,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"Error: failed to process step0003. Detail = {exc}", file=sys.stderr)
             return 1
 
         print(f"Processed step0003 TSV count: {len(objStep0003OutputPaths)}")
         for pszOutputPath in objStep0003OutputPaths:
             print(f"Output(step0003): {pszOutputPath}")
+        if objSkippedYearMonths:
+            print(f"Skipped step0003 count: {len(objSkippedYearMonths)}")
+            for pszYearMonth in objSkippedYearMonths:
+                print(f"Skipped(step0003): {pszYearMonth}")
         return 0
 
     if not objPlInputFiles:
@@ -405,6 +416,25 @@ def main() -> int:
         print(f"Warning error file count: {len(objErrorPaths)}")
         for pszPath in objErrorPaths:
             print(f"WarningErrorFile: {pszPath}")
+
+    if objManhourInputFiles:
+        objStep0002Map = build_year_month_path_map(objStep0002OutputPaths)
+        objManhourMap = build_year_month_path_map(objManhourInputFiles)
+        try:
+            objStep0003OutputPaths, objSkippedYearMonths = run_step0003_with_maps(
+                objStep0002Map,
+                objManhourMap,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"Error: failed to process step0003. Detail = {exc}", file=sys.stderr)
+            return 1
+        print(f"Processed step0003 TSV count: {len(objStep0003OutputPaths)}")
+        for pszOutputPath in objStep0003OutputPaths:
+            print(f"Output(step0003): {pszOutputPath}")
+        if objSkippedYearMonths:
+            print(f"Skipped step0003 count: {len(objSkippedYearMonths)}")
+            for pszYearMonth in objSkippedYearMonths:
+                print(f"Skipped(step0003): {pszYearMonth}")
 
     return 0
 
