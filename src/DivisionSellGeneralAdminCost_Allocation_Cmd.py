@@ -21,6 +21,7 @@ import sys
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+import openpyxl
 
 PL_TSV_PATTERN = re.compile(r"^損益計算書_(\d{4})年(\d{2})月_A∪B_プロジェクト名_C∪D_vertical\.tsv$")
 STEP0001_TSV_PATTERN = re.compile(r"^損益計算書_step0001_(\d{4})年(\d{2})月_A∪B_C∪D_Div販管費_vertical\.tsv$")
@@ -614,6 +615,48 @@ def aggregate_step0004_for_periods(objStep0004Paths: List[str]) -> Tuple[List[st
     return objOutputPaths, objWarningPaths, objErrorPaths
 
 
+def create_step0004_summary_excel(objPeriodPaths: List[str]) -> Optional[str]:
+    if not objPeriodPaths:
+        return None
+    objWorkbook = openpyxl.Workbook()
+    objDefaultSheet = objWorkbook.active
+    objWorkbook.remove(objDefaultSheet)
+
+    objPattern = re.compile(r"step0004_(\d{4}年\d{2}月-\d{4}年\d{2}月)_A∪B_C∪D_Div販管費_vertical\.tsv$")
+    for pszPeriodPath in objPeriodPaths:
+        pszBaseName: str = os.path.basename(pszPeriodPath)
+        objMatch = objPattern.search(pszBaseName)
+        pszSheetName: str = objMatch.group(1) if objMatch is not None else os.path.splitext(pszBaseName)[0][:31]
+        if len(pszSheetName) > 31:
+            pszSheetName = pszSheetName[:31]
+        objSheet = objWorkbook.create_sheet(title=pszSheetName)
+        with open(pszPeriodPath, "r", encoding="utf-8", newline="") as objInputFile:
+            objRows: List[List[str]] = list(csv.reader(objInputFile, delimiter="\t"))
+        for iRowIndex, objRow in enumerate(objRows, start=1):
+            for iColumnIndex, pszValue in enumerate(objRow, start=1):
+                objCell = objSheet.cell(row=iRowIndex, column=iColumnIndex)
+                if iRowIndex == 1 or iColumnIndex == 1:
+                    objCell.value = str(pszValue)
+                    continue
+                if iColumnIndex == 2:
+                    try:
+                        objCell.value = int(float(str(pszValue).replace(",", "").strip()))
+                    except ValueError:
+                        objCell.value = 0
+                    continue
+                if iColumnIndex == 3:
+                    pszText = str(pszValue).strip()
+                    objCell.value = pszText if pszText != "" else "0:00:00"
+                    continue
+                objCell.value = str(pszValue)
+    pszOutputPath: str = os.path.join(
+        os.path.dirname(objPeriodPaths[0]),
+        "損益計算書_step0004_合算Div販管費.xlsx",
+    )
+    objWorkbook.save(pszOutputPath)
+    return pszOutputPath
+
+
 def main() -> int:
     objInputFiles: List[str] = sys.argv[1:]
     if not objInputFiles:
@@ -656,6 +699,9 @@ def main() -> int:
             print(f"Processed step0004 period TSV count: {len(objPeriodPaths)}")
             for pszOutputPath in objPeriodPaths:
                 print(f"Output(step0004_period): {pszOutputPath}")
+            pszSummaryExcelPath: Optional[str] = create_step0004_summary_excel(objPeriodPaths)
+            if pszSummaryExcelPath is not None:
+                print(f"Output(step0004_summary_xlsx): {pszSummaryExcelPath}")
         for pszWarningPath in objPeriodWarningPaths:
             print(f"WarningErrorFile: {pszWarningPath}")
         for pszErrorPath in objPeriodErrorPaths:
@@ -740,6 +786,9 @@ def main() -> int:
             print(f"Processed step0004 period TSV count: {len(objPeriodPaths)}")
             for pszOutputPath in objPeriodPaths:
                 print(f"Output(step0004_period): {pszOutputPath}")
+            pszSummaryExcelPath = create_step0004_summary_excel(objPeriodPaths)
+            if pszSummaryExcelPath is not None:
+                print(f"Output(step0004_summary_xlsx): {pszSummaryExcelPath}")
         for pszWarningPath in objPeriodWarningPaths:
             print(f"WarningErrorFile: {pszWarningPath}")
         for pszErrorPath in objPeriodErrorPaths:
