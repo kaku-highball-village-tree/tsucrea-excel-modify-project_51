@@ -660,6 +660,45 @@ def create_step0004_summary_excel(objPeriodPaths: List[str]) -> Optional[str]:
     return pszOutputPath
 
 
+def build_step0005_output_file_name(pszStep0004PeriodBaseName: str) -> Optional[str]:
+    objMatch = re.fullmatch(
+        r"損益計算書_step0004_(\d{4}年\d{2}月-\d{4}年\d{2}月)_A∪B_C∪D_Div販管費_vertical\.tsv",
+        pszStep0004PeriodBaseName,
+    )
+    if objMatch is None:
+        return None
+    return f"損益計算書_step0005_{objMatch.group(1)}_A∪B_C∪D_Div販管費_vertical.tsv"
+
+
+def create_step0005_from_period_paths(objPeriodPaths: List[str]) -> List[str]:
+    objStep0005Paths: List[str] = []
+    for pszPeriodPath in objPeriodPaths:
+        pszBaseName: str = os.path.basename(pszPeriodPath)
+        pszStep0005BaseName: Optional[str] = build_step0005_output_file_name(pszBaseName)
+        if pszStep0005BaseName is None:
+            continue
+        with open(pszPeriodPath, "r", encoding="utf-8", newline="") as objInputFile:
+            objRows: List[List[str]] = list(csv.reader(objInputFile, delimiter="\t"))
+        iStartIndex: int = -1
+        iEndIndex: int = -1
+        for iRowIndex, objRow in enumerate(objRows):
+            pszFirstColumn: str = objRow[0].strip() if len(objRow) >= 1 else ""
+            if iStartIndex < 0 and pszFirstColumn == "合計":
+                iStartIndex = iRowIndex
+                continue
+            if iStartIndex >= 0 and pszFirstColumn == "Div販管費":
+                iEndIndex = iRowIndex
+                break
+        if iStartIndex >= 0 and iEndIndex >= iStartIndex:
+            objRows = objRows[:iStartIndex] + objRows[iEndIndex + 1 :]
+        pszOutputPath: str = os.path.join(os.path.dirname(pszPeriodPath), pszStep0005BaseName)
+        with open(pszOutputPath, "w", encoding="utf-8", newline="") as objOutputFile:
+            objWriter = csv.writer(objOutputFile, delimiter="\t", lineterminator="\n")
+            objWriter.writerows(objRows)
+        objStep0005Paths.append(pszOutputPath)
+    return objStep0005Paths
+
+
 def main() -> int:
     objInputFiles: List[str] = sys.argv[1:]
     if not objInputFiles:
@@ -705,6 +744,10 @@ def main() -> int:
             pszSummaryExcelPath: Optional[str] = create_step0004_summary_excel(objPeriodPaths)
             if pszSummaryExcelPath is not None:
                 print(f"Output(step0004_summary_xlsx): {pszSummaryExcelPath}")
+            objStep0005Paths: List[str] = create_step0005_from_period_paths(objPeriodPaths)
+            print(f"Processed step0005 TSV count: {len(objStep0005Paths)}")
+            for pszOutputPath in objStep0005Paths:
+                print(f"Output(step0005): {pszOutputPath}")
         for pszWarningPath in objPeriodWarningPaths:
             print(f"WarningErrorFile: {pszWarningPath}")
         for pszErrorPath in objPeriodErrorPaths:
@@ -792,6 +835,10 @@ def main() -> int:
             pszSummaryExcelPath = create_step0004_summary_excel(objPeriodPaths)
             if pszSummaryExcelPath is not None:
                 print(f"Output(step0004_summary_xlsx): {pszSummaryExcelPath}")
+            objStep0005Paths = create_step0005_from_period_paths(objPeriodPaths)
+            print(f"Processed step0005 TSV count: {len(objStep0005Paths)}")
+            for pszOutputPath in objStep0005Paths:
+                print(f"Output(step0005): {pszOutputPath}")
         for pszWarningPath in objPeriodWarningPaths:
             print(f"WarningErrorFile: {pszWarningPath}")
         for pszErrorPath in objPeriodErrorPaths:
