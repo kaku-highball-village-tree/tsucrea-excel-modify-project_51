@@ -443,6 +443,152 @@ def run_step0004_for_paths(objStep0003Paths: List[str]) -> List[str]:
     return objStep0004Paths
 
 
+def parse_year_month_value(pszYearMonth: str) -> Optional[Tuple[int, int]]:
+    try:
+        iYearText: str = pszYearMonth.split("年", 1)[0]
+        iMonthText: str = pszYearMonth.split("年", 1)[1].split("月", 1)[0]
+        iYear: int = int(iYearText)
+        iMonth: int = int(iMonthText)
+    except (ValueError, IndexError):
+        return None
+    if iMonth < 1 or iMonth > 12:
+        return None
+    return iYear, iMonth
+
+
+def parse_account_periods_from_file(pszPath: str) -> Dict[str, Tuple[Tuple[int, int], Tuple[int, int]]]:
+    with open(pszPath, "r", encoding="utf-8", newline="") as objInputFile:
+        objLines: List[str] = [pszLine.rstrip("\n").rstrip("\r") for pszLine in objInputFile]
+    objPeriods: Dict[str, Tuple[Tuple[int, int], Tuple[int, int]]] = {}
+    pszCurrentSection: str = ""
+    pszCurrentPeriod: str = ""
+    for iIndex, pszLine in enumerate(objLines):
+        pszText: str = pszLine.strip()
+        if pszText in ("3月決算の会計期間:", "8月決算の会計期間:"):
+            pszCurrentSection = pszText[:3]
+            pszCurrentPeriod = ""
+            continue
+        if pszText in ("前期", "当期"):
+            pszCurrentPeriod = pszText
+            continue
+        if not pszText.startswith("開始:"):
+            continue
+        if pszCurrentSection == "" or pszCurrentPeriod == "":
+            continue
+        if iIndex + 1 >= len(objLines):
+            continue
+        pszStart = pszText.split(":", 1)[1].strip().replace("/", "年") + "月"
+        pszEndLine: str = objLines[iIndex + 1].strip()
+        if not pszEndLine.startswith("終了:"):
+            continue
+        pszEnd = pszEndLine.split(":", 1)[1].strip().replace("/", "年") + "月"
+        objStart = parse_year_month_value(pszStart)
+        objEnd = parse_year_month_value(pszEnd)
+        if objStart is None or objEnd is None:
+            continue
+        objPeriods[f"{pszCurrentSection}_{pszCurrentPeriod}"] = (objStart, objEnd)
+    return objPeriods
+
+
+def is_within_period(objTarget: Tuple[int, int], objStart: Tuple[int, int], objEnd: Tuple[int, int]) -> bool:
+    return objStart <= objTarget <= objEnd
+
+
+def aggregate_step0004_for_periods(objStep0004Paths: List[str]) -> Tuple[List[str], List[str], List[str]]:
+    pszPeriodFilePath: str = os.path.join(
+        os.path.dirname(__file__),
+        "SellGeneralAdminCost_Allocation_Cmd_SelectedRange_And_AccountPeriodRange.txt",
+    )
+    if not os.path.isfile(pszPeriodFilePath):
+        return [], [], []
+    objPeriods = parse_account_periods_from_file(pszPeriodFilePath)
+    if not objPeriods:
+        return [], [], []
+
+    objStep0004ByMonth: Dict[Tuple[int, int], str] = {}
+    for pszPath in objStep0004Paths:
+        objMatch = re.fullmatch(r".*step0004_(\d{4})年(\d{2})月_.*\.tsv$", os.path.basename(pszPath))
+        if objMatch is None:
+            continue
+        objStep0004ByMonth[(int(objMatch.group(1)), int(objMatch.group(2)))] = pszPath
+
+    objOutputPaths: List[str] = []
+    objWarningPaths: List[str] = []
+    objErrorPaths: List[str] = []
+    for pszPeriodKey, (objStart, objEnd) in objPeriods.items():
+        objMonths: List[Tuple[int, int]] = []
+        iYear, iMonth = objStart
+        while (iYear, iMonth) <= objEnd:
+            objMonths.append((iYear, iMonth))
+            iMonth += 1
+            if iMonth == 13:
+                iMonth = 1
+                iYear += 1
+        objMissingMonths: List[str] = []
+        objSourcePaths: List[str] = []
+        for objMonth in objMonths:
+            if objMonth not in objStep0004ByMonth:
+                objMissingMonths.append(f"{objMonth[0]}年{objMonth[1]:02d}月")
+            else:
+                objSourcePaths.append(objStep0004ByMonth[objMonth])
+        if objMissingMonths:
+            pszErrorPath = os.path.join(
+                os.path.dirname(objStep0004Paths[0]),
+                f"損益計算書_step0004_{objStart[0]}年{objStart[1]:02d}月-{objEnd[0]}年{objEnd[1]:02d}月_A∪B_C∪D_Div販管費_vertical.tsv_error.txt",
+            )
+            with open(pszErrorPath, "w", encoding="utf-8", newline="") as objErrorFile:
+                objErrorFile.write("ERROR_TYPE: MISSING_MONTH_IN_PERIOD\n")
+                objErrorFile.write("PERIOD: " + pszPeriodKey + "\n")
+                for pszMonth in objMissingMonths:
+                    objErrorFile.write("MISSING_MONTH: " + pszMonth + "\n")
+            objErrorPaths.append(pszErrorPath)
+            continue
+        if not objSourcePaths:
+            continue
+        objAggregatedRows: List[List[str]] = []
+        objNumericWarnings: List[str] = []
+        for iFileIndex, pszSourcePath in enumerate(objSourcePaths):
+            with open(pszSourcePath, "r", encoding="utf-8", newline="") as objInputFile:
+                objRows = list(csv.reader(objInputFile, delimiter="\t"))
+            if iFileIndex == 0:
+                objAggregatedRows = [list(objRow) for objRow in objRows]
+                continue
+            for iRowIndex, objRow in enumerate(objRows):
+                while iRowIndex >= len(objAggregatedRows):
+                    objAggregatedRows.append([""])
+                objTargetRow = objAggregatedRows[iRowIndex]
+                iMaxColumns = max(len(objTargetRow), len(objRow))
+                while len(objTargetRow) < iMaxColumns:
+                    objTargetRow.append("")
+                while len(objRow) < iMaxColumns:
+                    objRow.append("")
+                for iColumnIndex in range(1, iMaxColumns):
+                    fLeft = parse_numeric_value(objTargetRow[iColumnIndex], iRowIndex, [])
+                    fRightWarnings: List[Dict[str, str]] = []
+                    fRight = parse_numeric_value(objRow[iColumnIndex], iRowIndex, fRightWarnings)
+                    if fRightWarnings:
+                        objNumericWarnings.append(f"ROW={iRowIndex},COL={iColumnIndex},VALUE={objRow[iColumnIndex]}")
+                    objTargetRow[iColumnIndex] = str(int(round(fLeft + fRight)))
+                objAggregatedRows[iRowIndex] = objTargetRow
+        pszOutputPath = os.path.join(
+            os.path.dirname(objSourcePaths[0]),
+            f"損益計算書_step0004_{objStart[0]}年{objStart[1]:02d}月-{objEnd[0]}年{objEnd[1]:02d}月_A∪B_C∪D_Div販管費_vertical.tsv",
+        )
+        with open(pszOutputPath, "w", encoding="utf-8", newline="") as objOutputFile:
+            objWriter = csv.writer(objOutputFile, delimiter="\t", lineterminator="\n")
+            objWriter.writerows(objAggregatedRows)
+        objOutputPaths.append(pszOutputPath)
+        if objNumericWarnings:
+            pszWarningPath = pszOutputPath + "_error.txt"
+            with open(pszWarningPath, "w", encoding="utf-8", newline="") as objWarningFile:
+                objWarningFile.write("ERROR_TYPE: NON_NUMERIC_VALUE_REPLACED_WITH_ZERO\n")
+                objWarningFile.write("PERIOD: " + pszPeriodKey + "\n")
+                for pszWarning in objNumericWarnings:
+                    objWarningFile.write(pszWarning + "\n")
+            objWarningPaths.append(pszWarningPath)
+    return objOutputPaths, objWarningPaths, objErrorPaths
+
+
 def main() -> int:
     objInputFiles: List[str] = sys.argv[1:]
     if not objInputFiles:
@@ -480,6 +626,15 @@ def main() -> int:
         print(f"Processed step0004 TSV count: {len(objStep0004Paths)}")
         for pszOutputPath in objStep0004Paths:
             print(f"Output(step0004): {pszOutputPath}")
+        objPeriodPaths, objPeriodWarningPaths, objPeriodErrorPaths = aggregate_step0004_for_periods(objStep0004Paths)
+        if objPeriodPaths:
+            print(f"Processed step0004 period TSV count: {len(objPeriodPaths)}")
+            for pszOutputPath in objPeriodPaths:
+                print(f"Output(step0004_period): {pszOutputPath}")
+        for pszWarningPath in objPeriodWarningPaths:
+            print(f"WarningErrorFile: {pszWarningPath}")
+        for pszErrorPath in objPeriodErrorPaths:
+            print(f"ErrorFile: {pszErrorPath}")
         if objSkippedYearMonths:
             print(f"Skipped step0003 count: {len(objSkippedYearMonths)}")
             for pszYearMonth in objSkippedYearMonths:
@@ -555,6 +710,15 @@ def main() -> int:
         print(f"Processed step0004 TSV count: {len(objStep0004Paths)}")
         for pszOutputPath in objStep0004Paths:
             print(f"Output(step0004): {pszOutputPath}")
+        objPeriodPaths, objPeriodWarningPaths, objPeriodErrorPaths = aggregate_step0004_for_periods(objStep0004Paths)
+        if objPeriodPaths:
+            print(f"Processed step0004 period TSV count: {len(objPeriodPaths)}")
+            for pszOutputPath in objPeriodPaths:
+                print(f"Output(step0004_period): {pszOutputPath}")
+        for pszWarningPath in objPeriodWarningPaths:
+            print(f"WarningErrorFile: {pszWarningPath}")
+        for pszErrorPath in objPeriodErrorPaths:
+            print(f"ErrorFile: {pszErrorPath}")
         if objSkippedYearMonths:
             print(f"Skipped step0003 count: {len(objSkippedYearMonths)}")
             for pszYearMonth in objSkippedYearMonths:
