@@ -649,6 +649,9 @@ def create_step0004_summary_excel(objPeriodPaths: List[str]) -> Optional[str]:
                     objCell.value = pszText if pszText != "" else "0:00:00"
                     continue
                 objCell.value = str(pszValue)
+        objSheet.column_dimensions["A"].width = 105
+        objSheet.column_dimensions["B"].width = 28
+        objSheet.column_dimensions["C"].width = 10
     pszOutputPath: str = os.path.join(
         os.path.dirname(objPeriodPaths[0]),
         "損益計算書_step0004_合算Div販管費.xlsx",
