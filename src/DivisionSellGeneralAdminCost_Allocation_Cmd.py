@@ -33,7 +33,7 @@ MANHOUR_TSV_PATTERN = re.compile(
 TARGET_COLUMN_NAME: str = "販売費及び一般管理費計"
 RANGE_START_LABEL: str = "スタートアップコミュニティDiv販管費"
 RANGE_END_LABEL: str = "C008_新規プロポーザル"
-PROJECT_CODE_PATTERN = re.compile(r"((?:P\d{5}|[^P]\d{3})_)")
+PROJECT_CODE_PATTERN = re.compile(r"(P\d{5}|[A-OQ-Z]\d{3})_")
 
 
 def append_error_log(pszMessage: str) -> None:
@@ -145,6 +145,10 @@ def extract_project_code(pszText: str) -> Optional[str]:
     if objMatch is None:
         return None
     return objMatch.group(1)
+
+
+def normalize_project_code_for_match(pszText: str) -> Optional[str]:
+    return extract_project_code(pszText)
 
 
 def find_target_column_index(objHeader: List[str]) -> Optional[int]:
@@ -724,8 +728,9 @@ def load_jurisdiction_master() -> Dict[str, Tuple[str, str]]:
     for objRow in objRows[1:]:
         if iCodeIndex >= len(objRow):
             continue
-        pszCode: str = objRow[iCodeIndex].strip()
-        if pszCode == "" or pszCode in objMaster:
+        pszCodeText: str = objRow[iCodeIndex].strip()
+        pszCode: Optional[str] = normalize_project_code_for_match(pszCodeText)
+        if pszCode is None or pszCode in objMaster:
             continue
         pszCompany: str = objRow[iCompanyIndex].strip() if iCompanyIndex < len(objRow) else ""
         pszGroup: str = objRow[iGroupIndex].strip() if iGroupIndex < len(objRow) else ""
@@ -758,7 +763,7 @@ def create_step0006_from_step0005_paths(objStep0005Paths: List[str]) -> Tuple[Li
         objGrpRows: List[List[str]] = [list(objRow) for objRow in objRows]
         for iRowIndex in range(1, len(objRows)):
             pszFirstColumn: str = objRows[iRowIndex][0] if len(objRows[iRowIndex]) >= 1 else ""
-            pszCode: Optional[str] = extract_project_code(pszFirstColumn)
+            pszCode: Optional[str] = normalize_project_code_for_match(pszFirstColumn)
             if pszCode is None or pszCode not in objMaster:
                 continue
             pszCompany, pszGroup = objMaster[pszCode]
