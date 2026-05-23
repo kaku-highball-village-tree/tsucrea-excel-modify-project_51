@@ -193,7 +193,7 @@ def process_one_step0001_tsv_to_step0002(pszStep0001Path: str) -> Tuple[Optional
             fCurrentRangeSum += parse_numeric_value(pszSecondColumn, iRowIndex, objWarnings)
 
         if bInRange and pszFirstColumn == RANGE_END_LABEL:
-            objOutputRows.append(["Div販管費", str(fCurrentRangeSum)])
+            objOutputRows.append(["Div販管費", str(int(fCurrentRangeSum))])
             iInsertedCount += 1
             bInRange = False
             fCurrentRangeSum = 0.0
