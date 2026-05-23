@@ -24,9 +24,14 @@ from typing import Dict, List, Optional, Tuple
 
 PL_TSV_PATTERN = re.compile(r"^損益計算書_(\d{4})年(\d{2})月_A∪B_プロジェクト名_C∪D_vertical\.tsv$")
 STEP0001_TSV_PATTERN = re.compile(r"^損益計算書_step0001_(\d{4})年(\d{2})月_A∪B_C∪D_Div販管費_vertical\.tsv$")
+STEP0002_TSV_PATTERN = re.compile(r"^損益計算書_step0002_(\d{4})年(\d{2})月_A∪B_C∪D_Div販管費_vertical\.tsv$")
+MANHOUR_TSV_PATTERN = re.compile(
+    r"^工数_(\d{4})年(\d{2})月_step0014_各プロジェクトの計上カンパニー名_工数_カンパニーの工数\.tsv$"
+)
 TARGET_COLUMN_NAME: str = "販売費及び一般管理費計"
 RANGE_START_LABEL: str = "スタートアップコミュニティDiv販管費"
 RANGE_END_LABEL: str = "C008_新規プロポーザル"
+PROJECT_CODE_PATTERN = re.compile(r"((?:P\d{5}|[^P]\d{3})_)")
 
 
 def append_error_log(pszMessage: str) -> None:
@@ -80,6 +85,14 @@ def is_step0001_tsv_file_name(pszBaseName: str) -> bool:
     return STEP0001_TSV_PATTERN.fullmatch(pszBaseName) is not None
 
 
+def is_step0002_tsv_file_name(pszBaseName: str) -> bool:
+    return STEP0002_TSV_PATTERN.fullmatch(pszBaseName) is not None
+
+
+def is_manhour_tsv_file_name(pszBaseName: str) -> bool:
+    return MANHOUR_TSV_PATTERN.fullmatch(pszBaseName) is not None
+
+
 def build_step0001_output_file_name(pszInputBaseName: str) -> Optional[str]:
     objMatch = PL_TSV_PATTERN.fullmatch(pszInputBaseName)
     if objMatch is None:
@@ -96,6 +109,31 @@ def build_step0002_output_file_name(pszStep0001BaseName: str) -> Optional[str]:
     iYear: str = objMatch.group(1)
     iMonth: str = objMatch.group(2)
     return f"損益計算書_step0002_{iYear}年{iMonth}月_A∪B_C∪D_Div販管費_vertical.tsv"
+
+
+def build_step0003_output_file_name(pszStep0002BaseName: str) -> Optional[str]:
+    objMatch = STEP0002_TSV_PATTERN.fullmatch(pszStep0002BaseName)
+    if objMatch is None:
+        return None
+    iYear: str = objMatch.group(1)
+    iMonth: str = objMatch.group(2)
+    return f"損益計算書_step0003_{iYear}年{iMonth}月_A∪B_C∪D_Div販管費_vertical.tsv"
+
+
+def extract_year_month_from_name(pszBaseName: str) -> Optional[str]:
+    objPatterns = [PL_TSV_PATTERN, STEP0001_TSV_PATTERN, STEP0002_TSV_PATTERN, MANHOUR_TSV_PATTERN]
+    for objPattern in objPatterns:
+        objMatch = objPattern.fullmatch(pszBaseName)
+        if objMatch is not None:
+            return f"{objMatch.group(1)}年{objMatch.group(2)}月"
+    return None
+
+
+def extract_project_code(pszText: str) -> Optional[str]:
+    objMatch = PROJECT_CODE_PATTERN.search(pszText)
+    if objMatch is None:
+        return None
+    return objMatch.group(1)
 
 
 def find_target_column_index(objHeader: List[str]) -> Optional[int]:
@@ -213,6 +251,54 @@ def process_one_step0001_tsv_to_step0002(pszStep0001Path: str) -> Tuple[Optional
     return pszOutputPath, pszErrorPath
 
 
+def load_manhour_map(pszManhourPath: str) -> Dict[str, str]:
+    with open(pszManhourPath, "r", encoding="utf-8", newline="") as objInputFile:
+        objReader = csv.reader(objInputFile, delimiter="\t")
+        objRows: List[List[str]] = list(objReader)
+
+    objMap: Dict[str, str] = {}
+    for objRow in objRows:
+        if len(objRow) < 3:
+            continue
+        pszProjectCode: Optional[str] = extract_project_code(objRow[0])
+        if pszProjectCode is None:
+            continue
+        objMap[pszProjectCode] = objRow[2]
+    return objMap
+
+
+def process_one_step0002_with_manhour_to_step0003(
+    pszStep0002Path: str,
+    pszManhourPath: str,
+) -> str:
+    pszStep0002BaseName: str = os.path.basename(pszStep0002Path)
+    pszOutputBaseName: Optional[str] = build_step0003_output_file_name(pszStep0002BaseName)
+    if pszOutputBaseName is None:
+        raise ValueError(f"invalid step0002 TSV file name: {pszStep0002BaseName}")
+
+    objManhourMap: Dict[str, str] = load_manhour_map(pszManhourPath)
+
+    with open(pszStep0002Path, "r", encoding="utf-8", newline="") as objInputFile:
+        objReader = csv.reader(objInputFile, delimiter="\t")
+        objRows: List[List[str]] = list(objReader)
+
+    objOutputRows: List[List[str]] = []
+    for objRow in objRows:
+        objNewRow: List[str] = list(objRow)
+        while len(objNewRow) < 3:
+            objNewRow.append("")
+        pszProjectCode: Optional[str] = extract_project_code(objNewRow[0] if objNewRow else "")
+        if pszProjectCode is not None and pszProjectCode in objManhourMap:
+            objNewRow[2] = objManhourMap[pszProjectCode]
+        objOutputRows.append(objNewRow)
+
+    pszOutputPath: str = os.path.join(os.path.dirname(pszStep0002Path), pszOutputBaseName)
+    with open(pszOutputPath, "w", encoding="utf-8", newline="") as objOutputFile:
+        objWriter = csv.writer(objOutputFile, delimiter="\t", lineterminator="\n")
+        objWriter.writerows(objOutputRows)
+    return pszOutputPath
+
+
 def main() -> int:
     objInputFiles: List[str] = sys.argv[1:]
     if not objInputFiles:
@@ -220,10 +306,54 @@ def main() -> int:
         return 1
 
     objPlInputFiles: List[str] = []
+    objStep0002InputFiles: List[str] = []
+    objManhourInputFiles: List[str] = []
     for pszPath in objInputFiles:
         pszBaseName: str = os.path.basename(pszPath)
         if is_pl_tsv_file_name(pszBaseName):
             objPlInputFiles.append(pszPath)
+        elif is_step0002_tsv_file_name(pszBaseName):
+            objStep0002InputFiles.append(pszPath)
+        elif is_manhour_tsv_file_name(pszBaseName):
+            objManhourInputFiles.append(pszPath)
+
+    if objStep0002InputFiles and objManhourInputFiles:
+        objStep0002Map: Dict[str, str] = {}
+        objManhourMap: Dict[str, str] = {}
+        for pszStep0002Path in objStep0002InputFiles:
+            pszYearMonth: Optional[str] = extract_year_month_from_name(os.path.basename(pszStep0002Path))
+            if pszYearMonth is not None:
+                objStep0002Map[pszYearMonth] = pszStep0002Path
+        for pszManhourPath in objManhourInputFiles:
+            pszYearMonth = extract_year_month_from_name(os.path.basename(pszManhourPath))
+            if pszYearMonth is not None:
+                objManhourMap[pszYearMonth] = pszManhourPath
+
+        objStep0003OutputPaths: List[str] = []
+        for pszYearMonth, pszStep0002Path in sorted(objStep0002Map.items()):
+            if pszYearMonth not in objManhourMap:
+                continue
+            try:
+                pszStep0003Path: str = process_one_step0002_with_manhour_to_step0003(
+                    pszStep0002Path,
+                    objManhourMap[pszYearMonth],
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"Error: failed to process step0003 {pszStep0002Path}. Detail = {exc}",
+                    file=sys.stderr,
+                )
+                return 1
+            objStep0003OutputPaths.append(pszStep0003Path)
+
+        if not objStep0003OutputPaths:
+            print("Error: no matching year-month pairs for step0003.", file=sys.stderr)
+            return 1
+
+        print(f"Processed step0003 TSV count: {len(objStep0003OutputPaths)}")
+        for pszOutputPath in objStep0003OutputPaths:
+            print(f"Output(step0003): {pszOutputPath}")
+        return 0
 
     if not objPlInputFiles:
         print("Error: no PL TSV files matched the expected format.", file=sys.stderr)
