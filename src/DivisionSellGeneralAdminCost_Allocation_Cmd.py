@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple
 PL_TSV_PATTERN = re.compile(r"^損益計算書_(\d{4})年(\d{2})月_A∪B_プロジェクト名_C∪D_vertical\.tsv$")
 STEP0001_TSV_PATTERN = re.compile(r"^損益計算書_step0001_(\d{4})年(\d{2})月_A∪B_C∪D_Div販管費_vertical\.tsv$")
 STEP0002_TSV_PATTERN = re.compile(r"^損益計算書_step0002_(\d{4})年(\d{2})月_A∪B_C∪D_Div販管費_vertical\.tsv$")
+STEP0003_TSV_PATTERN = re.compile(r"^損益計算書_step0003_(\d{4})年(\d{2})月_A∪B_C∪D_Div販管費_vertical\.tsv$")
 MANHOUR_TSV_PATTERN = re.compile(
     r"^工数_(\d{4})年(\d{2})月_step0014_各プロジェクトの計上カンパニー名_工数_カンパニーの工数\.tsv$"
 )
@@ -118,6 +119,15 @@ def build_step0003_output_file_name(pszStep0002BaseName: str) -> Optional[str]:
     iYear: str = objMatch.group(1)
     iMonth: str = objMatch.group(2)
     return f"損益計算書_step0003_{iYear}年{iMonth}月_A∪B_C∪D_Div販管費_vertical.tsv"
+
+
+def build_step0004_output_file_name(pszStep0003BaseName: str) -> Optional[str]:
+    objMatch = STEP0003_TSV_PATTERN.fullmatch(pszStep0003BaseName)
+    if objMatch is None:
+        return None
+    iYear: str = objMatch.group(1)
+    iMonth: str = objMatch.group(2)
+    return f"損益計算書_step0004_{iYear}年{iMonth}月_A∪B_C∪D_Div販管費_vertical.tsv"
 
 
 def extract_year_month_from_name(pszBaseName: str) -> Optional[str]:
@@ -305,6 +315,97 @@ def process_one_step0002_with_manhour_to_step0003(
     return pszOutputPath
 
 
+def parse_time_to_seconds(pszTimeText: str) -> float:
+    pszText: str = pszTimeText.strip()
+    if pszText == "":
+        return 0.0
+    objParts: List[str] = pszText.split(":")
+    if len(objParts) != 3:
+        return 0.0
+    try:
+        iHours: int = int(objParts[0])
+        iMinutes: int = int(objParts[1])
+        iSeconds: int = int(objParts[2])
+    except ValueError:
+        return 0.0
+    return float(iHours * 3600 + iMinutes * 60 + iSeconds)
+
+
+def process_one_step0003_to_step0004(pszStep0003Path: str) -> Optional[str]:
+    pszBaseName: str = os.path.basename(pszStep0003Path)
+    pszOutputBaseName: Optional[str] = build_step0004_output_file_name(pszBaseName)
+    if pszOutputBaseName is None:
+        return None
+    with open(pszStep0003Path, "r", encoding="utf-8", newline="") as objInputFile:
+        objReader = csv.reader(objInputFile, delimiter="\t")
+        objRows: List[List[str]] = list(objReader)
+    if not objRows:
+        return None
+
+    iDivRowIndex: int = -1
+    for iRowIndex, objRow in enumerate(objRows):
+        if len(objRow) >= 1 and objRow[0].strip() == "Div販管費":
+            iDivRowIndex = iRowIndex
+            break
+    if iDivRowIndex < 0:
+        return None
+
+    fTotalAmount: float = 0.0
+    if len(objRows[iDivRowIndex]) >= 2:
+        fTotalAmount = parse_numeric_value(objRows[iDivRowIndex][1], iDivRowIndex, [])
+    iTargetTotal: int = int(round(fTotalAmount))
+
+    objTargetIndices: List[int] = []
+    objSeconds: List[float] = []
+    fTotalSeconds: float = 0.0
+    for iRowIndex in range(iDivRowIndex + 1, len(objRows)):
+        objRow = objRows[iRowIndex]
+        while len(objRow) < 3:
+            objRow.append("")
+        fSeconds: float = parse_time_to_seconds(objRow[2])
+        objTargetIndices.append(iRowIndex)
+        objSeconds.append(fSeconds)
+        if fSeconds > 0:
+            fTotalSeconds += fSeconds
+
+    if not objTargetIndices:
+        return None
+
+    objRawValues: List[float] = []
+    for fSeconds in objSeconds:
+        if fTotalSeconds <= 0.0 or fSeconds <= 0.0:
+            objRawValues.append(0.0)
+        else:
+            objRawValues.append(float(iTargetTotal) * fSeconds / fTotalSeconds)
+    objBaseValues: List[int] = [int(fRawValue // 1) for fRawValue in objRawValues]
+    iRemain: int = iTargetTotal - sum(objBaseValues)
+    objRankIndices: List[int] = list(range(len(objTargetIndices)))
+    objRankIndices.sort(
+        key=lambda iIndex: (
+            objRawValues[iIndex] - objBaseValues[iIndex],
+            objSeconds[iIndex],
+            -objTargetIndices[iIndex],
+        ),
+        reverse=True,
+    )
+    if iRemain > 0:
+        for iIndex in objRankIndices[:iRemain]:
+            objBaseValues[iIndex] += 1
+    elif iRemain < 0:
+        objRankIndicesAsc: List[int] = list(reversed(objRankIndices))
+        for iIndex in objRankIndicesAsc[: (-iRemain)]:
+            objBaseValues[iIndex] -= 1
+
+    for iTargetIndex, iRowIndex in enumerate(objTargetIndices):
+        objRows[iRowIndex][1] = str(objBaseValues[iTargetIndex])
+
+    pszOutputPath: str = os.path.join(os.path.dirname(pszStep0003Path), pszOutputBaseName)
+    with open(pszOutputPath, "w", encoding="utf-8", newline="") as objOutputFile:
+        objWriter = csv.writer(objOutputFile, delimiter="\t", lineterminator="\n")
+        objWriter.writerows(objRows)
+    return pszOutputPath
+
+
 def build_year_month_path_map(objPaths: List[str]) -> Dict[str, str]:
     objMap: Dict[str, str] = {}
     for pszPath in objPaths:
@@ -331,6 +432,15 @@ def run_step0003_with_maps(
         )
         objStep0003OutputPaths.append(pszStep0003Path)
     return objStep0003OutputPaths, objSkippedYearMonths
+
+
+def run_step0004_for_paths(objStep0003Paths: List[str]) -> List[str]:
+    objStep0004Paths: List[str] = []
+    for pszStep0003Path in objStep0003Paths:
+        pszStep0004Path: Optional[str] = process_one_step0003_to_step0004(pszStep0003Path)
+        if pszStep0004Path is not None:
+            objStep0004Paths.append(pszStep0004Path)
+    return objStep0004Paths
 
 
 def main() -> int:
@@ -366,6 +476,10 @@ def main() -> int:
         print(f"Processed step0003 TSV count: {len(objStep0003OutputPaths)}")
         for pszOutputPath in objStep0003OutputPaths:
             print(f"Output(step0003): {pszOutputPath}")
+        objStep0004Paths: List[str] = run_step0004_for_paths(objStep0003OutputPaths)
+        print(f"Processed step0004 TSV count: {len(objStep0004Paths)}")
+        for pszOutputPath in objStep0004Paths:
+            print(f"Output(step0004): {pszOutputPath}")
         if objSkippedYearMonths:
             print(f"Skipped step0003 count: {len(objSkippedYearMonths)}")
             for pszYearMonth in objSkippedYearMonths:
@@ -437,6 +551,10 @@ def main() -> int:
         print(f"Processed step0003 TSV count: {len(objStep0003OutputPaths)}")
         for pszOutputPath in objStep0003OutputPaths:
             print(f"Output(step0003): {pszOutputPath}")
+        objStep0004Paths: List[str] = run_step0004_for_paths(objStep0003OutputPaths)
+        print(f"Processed step0004 TSV count: {len(objStep0004Paths)}")
+        for pszOutputPath in objStep0004Paths:
+            print(f"Output(step0004): {pszOutputPath}")
         if objSkippedYearMonths:
             print(f"Skipped step0003 count: {len(objSkippedYearMonths)}")
             for pszYearMonth in objSkippedYearMonths:
