@@ -331,6 +331,17 @@ def parse_time_to_seconds(pszTimeText: str) -> float:
     return float(iHours * 3600 + iMinutes * 60 + iSeconds)
 
 
+def format_seconds_to_time_text(fSeconds: float) -> str:
+    iTotalSeconds: int = int(round(fSeconds))
+    if iTotalSeconds < 0:
+        iTotalSeconds = 0
+    iHours: int = iTotalSeconds // 3600
+    iRemainSeconds: int = iTotalSeconds % 3600
+    iMinutes: int = iRemainSeconds // 60
+    iSeconds: int = iRemainSeconds % 60
+    return f"{iHours}:{iMinutes:02d}:{iSeconds:02d}"
+
+
 def process_one_step0003_to_step0004(pszStep0003Path: str) -> Optional[str]:
     pszBaseName: str = os.path.basename(pszStep0003Path)
     pszOutputBaseName: Optional[str] = build_step0004_output_file_name(pszBaseName)
@@ -566,6 +577,17 @@ def aggregate_step0004_for_periods(objStep0004Paths: List[str]) -> Tuple[List[st
                     objAggregatedRows[iRowIndex] = objTargetRow
                     continue
                 for iColumnIndex in range(1, iMaxColumns):
+                    if iColumnIndex == 2:
+                        pszLeftTime: str = objTargetRow[iColumnIndex].strip()
+                        pszRightTime: str = objRow[iColumnIndex].strip()
+                        if pszLeftTime != "" and re.fullmatch(r"\d+:\d{2}:\d{2}", pszLeftTime) is None:
+                            objNumericWarnings.append(f"ROW={iRowIndex},COL={iColumnIndex},VALUE={objTargetRow[iColumnIndex]}")
+                        if pszRightTime != "" and re.fullmatch(r"\d+:\d{2}:\d{2}", pszRightTime) is None:
+                            objNumericWarnings.append(f"ROW={iRowIndex},COL={iColumnIndex},VALUE={objRow[iColumnIndex]}")
+                        fLeftSeconds: float = parse_time_to_seconds(objTargetRow[iColumnIndex])
+                        fRightSeconds: float = parse_time_to_seconds(objRow[iColumnIndex])
+                        objTargetRow[iColumnIndex] = format_seconds_to_time_text(fLeftSeconds + fRightSeconds)
+                        continue
                     fLeft = parse_numeric_value(objTargetRow[iColumnIndex], iRowIndex, [])
                     fRightWarnings: List[Dict[str, str]] = []
                     fRight = parse_numeric_value(objRow[iColumnIndex], iRowIndex, fRightWarnings)
