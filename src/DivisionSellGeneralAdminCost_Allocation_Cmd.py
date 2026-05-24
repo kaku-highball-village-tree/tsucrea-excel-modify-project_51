@@ -842,6 +842,16 @@ def build_step0007_output_file_name(pszStep0006DivBaseName: str) -> Optional[str
     return f"損益計算書_step0007_{objMatch.group(1)}_A∪B_C∪D_Div販管費_Div_vertical.tsv"
 
 
+def build_step0007_grp_output_file_name(pszStep0006GrpBaseName: str) -> Optional[str]:
+    objMatch = re.fullmatch(
+        r"損益計算書_step0006_(\d{4}年\d{2}月-\d{4}年\d{2}月)_A∪B_C∪D_Div販管費_Grp_vertical\.tsv",
+        pszStep0006GrpBaseName,
+    )
+    if objMatch is None:
+        return None
+    return f"損益計算書_step0007_{objMatch.group(1)}_A∪B_C∪D_Div販管費_Grp_vertical.tsv"
+
+
 def create_step0007_from_step0006_div_paths(objStep0006DivPaths: List[str]) -> List[str]:
     objOutputPaths: List[str] = []
     objTargetSubjects: List[str] = [
@@ -900,6 +910,64 @@ def create_step0007_from_step0006_div_paths(objStep0006DivPaths: List[str]) -> L
         if pszOutputBaseName is None:
             continue
         pszOutputPath: str = os.path.join(os.path.dirname(pszStep0006DivPath), pszOutputBaseName)
+        with open(pszOutputPath, "w", encoding="utf-8", newline="") as objOutputFile:
+            csv.writer(objOutputFile, delimiter="\t", lineterminator="\n").writerows(objOutputRows)
+        objOutputPaths.append(pszOutputPath)
+    return objOutputPaths
+
+
+def create_step0007_from_step0006_grp_paths(objStep0006GrpPaths: List[str]) -> List[str]:
+    objOutputPaths: List[str] = []
+    objTargetSubjects: List[str] = [
+        "受託事業-その他",
+        "受託事業-施設運営",
+        "自社-その他",
+        "自社-施設運営",
+    ]
+    objTargetSet = set(objTargetSubjects)
+    for pszStep0006GrpPath in objStep0006GrpPaths:
+        with open(pszStep0006GrpPath, "r", encoding="utf-8", newline="") as objInputFile:
+            objRows: List[List[str]] = list(csv.reader(objInputFile, delimiter="\t"))
+        if not objRows:
+            continue
+
+        objOutputRows: List[List[str]] = []
+        objHeaderRow: List[str] = list(objRows[0])
+        while len(objHeaderRow) < 3:
+            objHeaderRow.append("")
+        objOutputRows.append(objHeaderRow)
+
+        objSubjectToIndex: Dict[str, int] = {}
+        for iRowIndex in range(1, len(objRows)):
+            objRow: List[str] = list(objRows[iRowIndex])
+            while len(objRow) < 3:
+                objRow.append("")
+            pszSubject: str = objRow[0].strip()
+            if pszSubject == "その他":
+                continue
+            if pszSubject in objTargetSet:
+                if pszSubject not in objSubjectToIndex:
+                    objSubjectToIndex[pszSubject] = len(objOutputRows)
+                    objOutputRows.append([pszSubject, "0", "0:00:00"])
+                iTargetRowIndex: int = objSubjectToIndex[pszSubject]
+                iAmount: int = int(round(parse_numeric_value(objRow[1], iRowIndex, [])))
+                iCurrentAmount: int = int(round(parse_numeric_value(objOutputRows[iTargetRowIndex][1], iTargetRowIndex, [])))
+                fSeconds: float = parse_time_to_seconds(objRow[2])
+                fCurrentSeconds: float = parse_time_to_seconds(objOutputRows[iTargetRowIndex][2])
+                objOutputRows[iTargetRowIndex][1] = str(iCurrentAmount + iAmount)
+                objOutputRows[iTargetRowIndex][2] = format_seconds_to_time_text(fCurrentSeconds + fSeconds)
+            else:
+                if objRow[2].strip() == "":
+                    objRow[2] = "0:00:00"
+                elif parse_time_to_seconds(objRow[2]) == 0.0 and objRow[2].strip() != "0:00:00":
+                    objRow[2] = "0:00:00"
+                objOutputRows.append(objRow)
+
+        pszBaseName: str = os.path.basename(pszStep0006GrpPath)
+        pszOutputBaseName: Optional[str] = build_step0007_grp_output_file_name(pszBaseName)
+        if pszOutputBaseName is None:
+            continue
+        pszOutputPath: str = os.path.join(os.path.dirname(pszStep0006GrpPath), pszOutputBaseName)
         with open(pszOutputPath, "w", encoding="utf-8", newline="") as objOutputFile:
             csv.writer(objOutputFile, delimiter="\t", lineterminator="\n").writerows(objOutputRows)
         objOutputPaths.append(pszOutputPath)
@@ -966,6 +1034,10 @@ def main() -> int:
             print(f"Processed step0007 Div TSV count: {len(objStep0007Paths)}")
             for pszOutputPath in objStep0007Paths:
                 print(f"Output(step0007_div): {pszOutputPath}")
+            objStep0007GrpPaths: List[str] = create_step0007_from_step0006_grp_paths(objStep0006GrpPaths)
+            print(f"Processed step0007 Grp TSV count: {len(objStep0007GrpPaths)}")
+            for pszOutputPath in objStep0007GrpPaths:
+                print(f"Output(step0007_grp): {pszOutputPath}")
         for pszWarningPath in objPeriodWarningPaths:
             print(f"WarningErrorFile: {pszWarningPath}")
         for pszErrorPath in objPeriodErrorPaths:
@@ -1068,6 +1140,10 @@ def main() -> int:
             print(f"Processed step0007 Div TSV count: {len(objStep0007Paths)}")
             for pszOutputPath in objStep0007Paths:
                 print(f"Output(step0007_div): {pszOutputPath}")
+            objStep0007GrpPaths: List[str] = create_step0007_from_step0006_grp_paths(objStep0006GrpPaths)
+            print(f"Processed step0007 Grp TSV count: {len(objStep0007GrpPaths)}")
+            for pszOutputPath in objStep0007GrpPaths:
+                print(f"Output(step0007_grp): {pszOutputPath}")
         for pszWarningPath in objPeriodWarningPaths:
             print(f"WarningErrorFile: {pszWarningPath}")
         for pszErrorPath in objPeriodErrorPaths:
