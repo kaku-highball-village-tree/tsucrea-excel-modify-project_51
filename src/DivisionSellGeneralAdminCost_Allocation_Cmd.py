@@ -1015,6 +1015,47 @@ def create_step0007_div_summary_excel(objStep0007DivPaths: List[str]) -> Tuple[O
     return pszOutputPath, pszErrorPath
 
 
+def create_step0007_grp_summary_excel(objStep0007GrpPaths: List[str]) -> Tuple[Optional[str], Optional[str]]:
+    if not objStep0007GrpPaths:
+        return None, None
+    objWorkbook = openpyxl.Workbook()
+    objDefaultSheet = objWorkbook.active
+    objWorkbook.remove(objDefaultSheet)
+    objPattern = re.compile(
+        r"損益計算書_step0007_(\d{4}年\d{2}月-\d{4}年\d{2}月)_A∪B_C∪D_Div販管費_Grp_vertical\.tsv$"
+    )
+    for pszStep0007Path in objStep0007GrpPaths:
+        pszBaseName: str = os.path.basename(pszStep0007Path)
+        objMatch = objPattern.fullmatch(pszBaseName)
+        pszSheetName: str = objMatch.group(1) + "_Grp" if objMatch is not None else os.path.splitext(pszBaseName)[0][:31]
+        if len(pszSheetName) > 31:
+            pszSheetName = pszSheetName[:31]
+        objSheet = objWorkbook.create_sheet(title=pszSheetName)
+        with open(pszStep0007Path, "r", encoding="utf-8", newline="") as objInputFile:
+            objRows: List[List[str]] = list(csv.reader(objInputFile, delimiter="\t"))
+        for iRowIndex, objRow in enumerate(objRows, start=1):
+            for iColumnIndex, pszValue in enumerate(objRow, start=1):
+                objSheet.cell(row=iRowIndex, column=iColumnIndex).value = str(pszValue)
+
+    pszOutputPath: str = os.path.join(
+        os.path.dirname(objStep0007GrpPaths[0]),
+        "損益計算書_step0007_A∪B_C∪D_Div販管費_Grp.xlsx",
+    )
+    objWorkbook.save(pszOutputPath)
+    pszErrorPath: Optional[str] = None
+    if len(objStep0007GrpPaths) < 4:
+        pszErrorPath = pszOutputPath + "_error.txt"
+        with open(pszErrorPath, "w", encoding="utf-8", newline="") as objErrorFile:
+            objErrorFile.write("JOB: DivisionSellGeneralAdminCost_Allocation_Cmd.py\n")
+            objErrorFile.write("ERROR_TYPE: STEP0007_GRP_INPUT_MISSING\n")
+            objErrorFile.write("EXPECTED_COUNT: 4\n")
+            objErrorFile.write(f"ACTUAL_COUNT: {len(objStep0007GrpPaths)}\n")
+            objErrorFile.write("RESULT: WARNING\n")
+            for pszPath in objStep0007GrpPaths:
+                objErrorFile.write("INPUT_FILE: " + pszPath + "\n")
+    return pszOutputPath, pszErrorPath
+
+
 def main() -> int:
     objInputFiles: List[str] = sys.argv[1:]
     if not objInputFiles:
@@ -1084,6 +1125,11 @@ def main() -> int:
             print(f"Processed step0007 Grp TSV count: {len(objStep0007GrpPaths)}")
             for pszOutputPath in objStep0007GrpPaths:
                 print(f"Output(step0007_grp): {pszOutputPath}")
+            pszStep0007GrpSummaryPath, pszStep0007GrpSummaryErrorPath = create_step0007_grp_summary_excel(objStep0007GrpPaths)
+            if pszStep0007GrpSummaryPath is not None:
+                print(f"Output(step0007_grp_summary_xlsx): {pszStep0007GrpSummaryPath}")
+            if pszStep0007GrpSummaryErrorPath is not None:
+                print(f"WarningErrorFile: {pszStep0007GrpSummaryErrorPath}")
         for pszWarningPath in objPeriodWarningPaths:
             print(f"WarningErrorFile: {pszWarningPath}")
         for pszErrorPath in objPeriodErrorPaths:
@@ -1195,6 +1241,11 @@ def main() -> int:
             print(f"Processed step0007 Grp TSV count: {len(objStep0007GrpPaths)}")
             for pszOutputPath in objStep0007GrpPaths:
                 print(f"Output(step0007_grp): {pszOutputPath}")
+            pszStep0007GrpSummaryPath, pszStep0007GrpSummaryErrorPath = create_step0007_grp_summary_excel(objStep0007GrpPaths)
+            if pszStep0007GrpSummaryPath is not None:
+                print(f"Output(step0007_grp_summary_xlsx): {pszStep0007GrpSummaryPath}")
+            if pszStep0007GrpSummaryErrorPath is not None:
+                print(f"WarningErrorFile: {pszStep0007GrpSummaryErrorPath}")
         for pszWarningPath in objPeriodWarningPaths:
             print(f"WarningErrorFile: {pszWarningPath}")
         for pszErrorPath in objPeriodErrorPaths:
