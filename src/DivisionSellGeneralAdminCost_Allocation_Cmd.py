@@ -974,6 +974,47 @@ def create_step0007_from_step0006_grp_paths(objStep0006GrpPaths: List[str]) -> L
     return objOutputPaths
 
 
+def create_step0007_div_summary_excel(objStep0007DivPaths: List[str]) -> Tuple[Optional[str], Optional[str]]:
+    if not objStep0007DivPaths:
+        return None, None
+    objWorkbook = openpyxl.Workbook()
+    objDefaultSheet = objWorkbook.active
+    objWorkbook.remove(objDefaultSheet)
+    objPattern = re.compile(
+        r"損益計算書_step0007_(\d{4}年\d{2}月-\d{4}年\d{2}月)_A∪B_C∪D_Div販管費_Div_vertical\.tsv$"
+    )
+    for pszStep0007Path in objStep0007DivPaths:
+        pszBaseName: str = os.path.basename(pszStep0007Path)
+        objMatch = objPattern.fullmatch(pszBaseName)
+        pszSheetName: str = objMatch.group(1) + "_Div" if objMatch is not None else os.path.splitext(pszBaseName)[0][:31]
+        if len(pszSheetName) > 31:
+            pszSheetName = pszSheetName[:31]
+        objSheet = objWorkbook.create_sheet(title=pszSheetName)
+        with open(pszStep0007Path, "r", encoding="utf-8", newline="") as objInputFile:
+            objRows: List[List[str]] = list(csv.reader(objInputFile, delimiter="\t"))
+        for iRowIndex, objRow in enumerate(objRows, start=1):
+            for iColumnIndex, pszValue in enumerate(objRow, start=1):
+                objSheet.cell(row=iRowIndex, column=iColumnIndex).value = str(pszValue)
+
+    pszOutputPath: str = os.path.join(
+        os.path.dirname(objStep0007DivPaths[0]),
+        "損益計算書_step0007_A∪B_C∪D_Div販管費_Div.xlsx",
+    )
+    objWorkbook.save(pszOutputPath)
+    pszErrorPath: Optional[str] = None
+    if len(objStep0007DivPaths) < 4:
+        pszErrorPath = pszOutputPath + "_error.txt"
+        with open(pszErrorPath, "w", encoding="utf-8", newline="") as objErrorFile:
+            objErrorFile.write("JOB: DivisionSellGeneralAdminCost_Allocation_Cmd.py\n")
+            objErrorFile.write("ERROR_TYPE: STEP0007_DIV_INPUT_MISSING\n")
+            objErrorFile.write(f"EXPECTED_COUNT: 4\n")
+            objErrorFile.write(f"ACTUAL_COUNT: {len(objStep0007DivPaths)}\n")
+            objErrorFile.write("RESULT: WARNING\n")
+            for pszPath in objStep0007DivPaths:
+                objErrorFile.write("INPUT_FILE: " + pszPath + "\n")
+    return pszOutputPath, pszErrorPath
+
+
 def main() -> int:
     objInputFiles: List[str] = sys.argv[1:]
     if not objInputFiles:
@@ -1034,6 +1075,11 @@ def main() -> int:
             print(f"Processed step0007 Div TSV count: {len(objStep0007Paths)}")
             for pszOutputPath in objStep0007Paths:
                 print(f"Output(step0007_div): {pszOutputPath}")
+            pszStep0007SummaryPath, pszStep0007SummaryErrorPath = create_step0007_div_summary_excel(objStep0007Paths)
+            if pszStep0007SummaryPath is not None:
+                print(f"Output(step0007_div_summary_xlsx): {pszStep0007SummaryPath}")
+            if pszStep0007SummaryErrorPath is not None:
+                print(f"WarningErrorFile: {pszStep0007SummaryErrorPath}")
             objStep0007GrpPaths: List[str] = create_step0007_from_step0006_grp_paths(objStep0006GrpPaths)
             print(f"Processed step0007 Grp TSV count: {len(objStep0007GrpPaths)}")
             for pszOutputPath in objStep0007GrpPaths:
@@ -1140,6 +1186,11 @@ def main() -> int:
             print(f"Processed step0007 Div TSV count: {len(objStep0007Paths)}")
             for pszOutputPath in objStep0007Paths:
                 print(f"Output(step0007_div): {pszOutputPath}")
+            pszStep0007SummaryPath, pszStep0007SummaryErrorPath = create_step0007_div_summary_excel(objStep0007Paths)
+            if pszStep0007SummaryPath is not None:
+                print(f"Output(step0007_div_summary_xlsx): {pszStep0007SummaryPath}")
+            if pszStep0007SummaryErrorPath is not None:
+                print(f"WarningErrorFile: {pszStep0007SummaryErrorPath}")
             objStep0007GrpPaths: List[str] = create_step0007_from_step0006_grp_paths(objStep0006GrpPaths)
             print(f"Processed step0007 Grp TSV count: {len(objStep0007GrpPaths)}")
             for pszOutputPath in objStep0007GrpPaths:
