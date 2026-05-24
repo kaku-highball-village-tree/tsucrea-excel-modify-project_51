@@ -780,10 +780,51 @@ def create_step0006_from_step0005_paths(objStep0005Paths: List[str]) -> Tuple[Li
         if pszDivBaseName is None or pszGrpBaseName is None:
             continue
 
+        objTargetSubjects: List[str] = [
+            "テクノロジーインキュベーション",
+            "コンテンツビジネス",
+            "スタートアップサイド",
+            "スタートアップコミュニティ",
+            "スタートアップグロース",
+            "経営管理",
+            "事業開発",
+            "子会社",
+            "投資先",
+            "本部",
+        ]
+        objTargetSet = set(objTargetSubjects)
+        objAggregatedRows: List[List[str]] = []
+        objSubjectToIndex: Dict[str, int] = {}
+        if objDivRows:
+            objHeaderRow: List[str] = list(objDivRows[0])
+            while len(objHeaderRow) < 3:
+                objHeaderRow.append("")
+            objAggregatedRows.append(objHeaderRow)
+        for iRowIndex in range(1, len(objDivRows)):
+            objRow: List[str] = list(objDivRows[iRowIndex])
+            while len(objRow) < 3:
+                objRow.append("")
+            pszSubject: str = objRow[0].strip()
+            if pszSubject == "その他":
+                continue
+            if pszSubject in objTargetSet:
+                if pszSubject not in objSubjectToIndex:
+                    objSubjectToIndex[pszSubject] = len(objAggregatedRows)
+                    objAggregatedRows.append([pszSubject, "0", "0:00:00"])
+                iTargetIndex: int = objSubjectToIndex[pszSubject]
+                iAmount: int = int(round(parse_numeric_value(objRow[1], iRowIndex, [])))
+                iExistingAmount: int = int(round(parse_numeric_value(objAggregatedRows[iTargetIndex][1], iTargetIndex, [])))
+                fSeconds: float = parse_time_to_seconds(objRow[2])
+                fExistingSeconds: float = parse_time_to_seconds(objAggregatedRows[iTargetIndex][2])
+                objAggregatedRows[iTargetIndex][1] = str(iExistingAmount + iAmount)
+                objAggregatedRows[iTargetIndex][2] = format_seconds_to_time_text(fExistingSeconds + fSeconds)
+            else:
+                objAggregatedRows.append(objRow)
+
         pszDivOutputPath: str = os.path.join(os.path.dirname(pszStep0005Path), pszDivBaseName)
         pszGrpOutputPath: str = os.path.join(os.path.dirname(pszStep0005Path), pszGrpBaseName)
         with open(pszDivOutputPath, "w", encoding="utf-8", newline="") as objOutputFile:
-            csv.writer(objOutputFile, delimiter="\t", lineterminator="\n").writerows(objDivRows)
+            csv.writer(objOutputFile, delimiter="\t", lineterminator="\n").writerows(objAggregatedRows)
         with open(pszGrpOutputPath, "w", encoding="utf-8", newline="") as objOutputFile:
             csv.writer(objOutputFile, delimiter="\t", lineterminator="\n").writerows(objGrpRows)
         objDivPaths.append(pszDivOutputPath)
