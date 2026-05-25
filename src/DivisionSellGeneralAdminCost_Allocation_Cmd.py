@@ -998,7 +998,7 @@ def create_step0007_div_summary_excel(objStep0007DivPaths: List[str]) -> Tuple[O
 
     pszOutputPath: str = os.path.join(
         os.path.dirname(objStep0007DivPaths[0]),
-        "損益計算書_step0007_A∪B_C∪D_Div販管費_Div.xlsx",
+        "損益計算書_step0008_A∪B_C∪D_Div販管費_Div.xlsx",
     )
     objWorkbook.save(pszOutputPath)
     pszErrorPath: Optional[str] = None
@@ -1039,7 +1039,7 @@ def create_step0007_grp_summary_excel(objStep0007GrpPaths: List[str]) -> Tuple[O
 
     pszOutputPath: str = os.path.join(
         os.path.dirname(objStep0007GrpPaths[0]),
-        "損益計算書_step0007_A∪B_C∪D_Div販管費_Grp.xlsx",
+        "損益計算書_step0008_A∪B_C∪D_Div販管費_Grp.xlsx",
     )
     objWorkbook.save(pszOutputPath)
     pszErrorPath: Optional[str] = None
