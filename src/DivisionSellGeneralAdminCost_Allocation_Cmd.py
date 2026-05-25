@@ -994,7 +994,20 @@ def create_step0007_div_summary_excel(objStep0007DivPaths: List[str]) -> Tuple[O
             objRows: List[List[str]] = list(csv.reader(objInputFile, delimiter="\t"))
         for iRowIndex, objRow in enumerate(objRows, start=1):
             for iColumnIndex, pszValue in enumerate(objRow, start=1):
-                objSheet.cell(row=iRowIndex, column=iColumnIndex).value = str(pszValue)
+                objCell = objSheet.cell(row=iRowIndex, column=iColumnIndex)
+                if iRowIndex == 1 or iColumnIndex == 1:
+                    objCell.value = str(pszValue)
+                    continue
+                if iColumnIndex == 2:
+                    try:
+                        objCell.value = int(float(str(pszValue).replace(",", "").strip()))
+                    except ValueError:
+                        objCell.value = 0
+                    continue
+                if iColumnIndex == 3:
+                    objCell.value = str(pszValue)
+                    continue
+                objCell.value = str(pszValue)
 
     pszOutputPath: str = os.path.join(
         os.path.dirname(objStep0007DivPaths[0]),
@@ -1035,7 +1048,20 @@ def create_step0007_grp_summary_excel(objStep0007GrpPaths: List[str]) -> Tuple[O
             objRows: List[List[str]] = list(csv.reader(objInputFile, delimiter="\t"))
         for iRowIndex, objRow in enumerate(objRows, start=1):
             for iColumnIndex, pszValue in enumerate(objRow, start=1):
-                objSheet.cell(row=iRowIndex, column=iColumnIndex).value = str(pszValue)
+                objCell = objSheet.cell(row=iRowIndex, column=iColumnIndex)
+                if iRowIndex == 1 or iColumnIndex == 1:
+                    objCell.value = str(pszValue)
+                    continue
+                if iColumnIndex == 2:
+                    try:
+                        objCell.value = int(float(str(pszValue).replace(",", "").strip()))
+                    except ValueError:
+                        objCell.value = 0
+                    continue
+                if iColumnIndex == 3:
+                    objCell.value = str(pszValue)
+                    continue
+                objCell.value = str(pszValue)
 
     pszOutputPath: str = os.path.join(
         os.path.dirname(objStep0007GrpPaths[0]),
